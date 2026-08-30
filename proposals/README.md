@@ -4,6 +4,10 @@ No submission-ready governance proposals have been authored yet. The Rewarder V2
 relocated into `src/` and `test/`, but it remains unnumbered until its production deployment inputs and exact activation
 payload are dictated and reviewed.
 
+Voter-facing text that has been dictated but does not yet have a deployable, fully tested payload is preserved under
+`proposals/drafts/`. A draft moves into this directory only when its matching deployment script and pinned-fork test
+are ready, at which point the one-to-one proposal layout policy applies.
+
 Each proposal added to this repository receives a sequential `DGP-NNN` identifier, a Markdown description in this
 directory, its own deployment script under `script/proposals/DGPNNN/Deploy.s.sol`, and a corresponding test under
 `test/proposals/DGPNNN/Proposal.t.sol`.
