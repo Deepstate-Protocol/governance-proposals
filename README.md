@@ -2,8 +2,9 @@
 
 Foundry project for authoring, reviewing, simulating, and submitting proposals to the live Deepstate Governor. The
 repository contains the hardened Rewarder V2 release candidate and deterministic deployment tooling, but no
-submission-ready governance proposal yet. The two dictated descriptions remain drafts until the system contracts
-are deployed and their addresses, runtime hashes, receipts, and proposal fork block are pinned.
+submission-ready governance proposal yet. DGP-001 now has an exact executable payload candidate and proposal-specific
+tests; it remains blocked from submission until the system contracts are deployed, receipts are recorded, the live
+market is prepared, and the final archive-fork lifecycle test passes. DGP-002 remains a dictated draft.
 
 The project follows the Solidity and deployment conventions in
 [`deepstate-contracts`](https://github.com/Deepstate-Protocol/deepstate-contracts) and
@@ -21,10 +22,13 @@ pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinne
 base exposes a no-op lifecycle extension hook which V2 overrides to enforce terminal retirement without copying the
 protocol's reward math into this repository.
 
-This candidate is not a concrete DGP and has not been deployed. It includes a read-only deterministic CREATE2 plan,
-release manifest template, pinned live dependencies, and a live Sablier compatibility test; it does not yet include a
-submission-ready Governor action array or proposal ID. See [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the
-authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the production release procedure.
+The system contracts have not been deployed. The repository includes a read-only deterministic CREATE2 plan, release
+manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact eight-action
+Governor payload with a provisional pre-deployment ID. The payload is deliberately not submission-ready until its
+predicted targets are actual reviewed deployments and the final archive-fork release gates pass. See
+[`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
+the production release procedure. The proposal-specific external transaction sequence is recorded in
+[`docs/DGP-001-TRANSACTION-RUNBOOK.md`](docs/DGP-001-TRANSACTION-RUNBOOK.md).
 
 The current release policy caps live DEEP supply and permanent Controller issuance at 3 billion DEEP. DGP-001 will
 atomically create a one-year endowment equal to 30% of the legacy Rewarder's execution-time accrued emissions, activate
@@ -165,6 +169,16 @@ Dry-run a proposal without changing chain state:
 ```bash
 export PROPOSER=0xYourProposerAddress
 
+# Required offchain complement to the Solidity preflight: DEEP roles are not enumerable onchain.
+role_snapshot="$(cast block-number --rpc-url robinhood)"
+bash script/check-deep-role-history.sh "$role_snapshot"
+
+forge script \
+  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  --sig "validateSubmissionPreconditions()" \
+  --rpc-url robinhood \
+  -vvvv
+
 forge script \
   script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
   --rpc-url robinhood \
@@ -198,6 +212,25 @@ forge script \
   -vvvv
 ```
 
+Once the live `proposalSnapshot` has passed, every voter submits a separate vote transaction. Query the live deadline
+rather than calculating it from the repository's recorded parameters because a late quorum vote can extend it:
+
+```bash
+export GOVERNOR=0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff
+export PROPOSAL_ID=0xYourPinnedProposalId
+cast wallet import deepstate-voter --interactive
+
+cast call "$GOVERNOR" 'proposalSnapshot(uint256)(uint256)' "$PROPOSAL_ID" --rpc-url robinhood
+cast call "$GOVERNOR" 'proposalDeadline(uint256)(uint256)' "$PROPOSAL_ID" --rpc-url robinhood
+cast send "$GOVERNOR" 'castVote(uint256,uint8)(uint256)' "$PROPOSAL_ID" 1 \
+  --rpc-url robinhood \
+  --account deepstate-voter
+```
+
+`support = 1` is a vote for the proposal. Reopen `state(proposalId)` and `proposalDeadline(proposalId)` after voting;
+do not prepare the market based on an assumed deadline. See the DGP-001 transaction runbook for the claimant
+registration and owner-cancellation transactions required between a successful vote and execution.
+
 The base script refuses the wrong chain, a missing or misidentified Governor, an unexpected immutable launch time, a
 Governor backed by a token other than the documented STATE contract, malformed arrays, an empty description, a zero
 target/proposer, an unpinned or drifted proposal ID, insufficient delegated proposer votes, or premature submission.
@@ -209,6 +242,16 @@ same values, calldata, and description hash directly from the Governor. Dry-run 
 ```bash
 export EXECUTOR=0xYourExecutorAddress
 cast wallet import deepstate-executor --interactive
+
+# Repeat immediately before execution; this is what substantiates "no bypass DEEP minter."
+role_snapshot="$(cast block-number --rpc-url robinhood)"
+bash script/check-deep-role-history.sh "$role_snapshot"
+
+forge script \
+  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  --sig "validateActivationPreconditions()" \
+  --rpc-url robinhood \
+  -vvvv
 
 forge script \
   script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
@@ -235,7 +278,9 @@ forge script \
 ```
 
 `verifyExecution()` regenerates the pinned payload, checks its registered proposer, requires the live `Executed`
-state and direct-execution mode, and reruns the proposal-specific durable postconditions.
+state and direct-execution mode, and reruns the proposal-specific current postconditions. Run it immediately after
+execution; later authorized mints, market launches, claims, removals, or operator changes can legitimately invalidate
+exact initial-state checks.
 
 Production-chain Foundry broadcast artifacts are intentionally not ignored; preserve them with the reviewed commit so
 the submission and execution payloads remain reproducible. Local chain `31337` and dry-run artifacts stay ignored.

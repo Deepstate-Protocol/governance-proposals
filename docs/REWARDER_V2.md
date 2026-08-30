@@ -153,8 +153,10 @@ pinned DEEP token.
 ## Candidate activation sequence
 
 DGP-001 combines the endowment, controlled-minting activation, delegated Factory authority, and V1-to-V2 replacement
-in one atomic Governor execution. DGP-002 remains the separate volunteer allocation. This repository deliberately does
-not encode executable payloads until all production inputs and deployed addresses are fixed.
+in one atomic Governor execution. DGP-002 remains the separate volunteer allocation. The exact DGP-001 payload is now
+encoded as a pre-deployment candidate; its submission preflight intentionally rejects missing target deployments,
+configuration drift, insufficient cap headroom, or incompatible Sablier state. Market idleness is deliberately checked
+immediately before execution so the market does not need to remain unavailable throughout the voting period.
 
 Before proposal submission:
 
@@ -165,11 +167,12 @@ Before proposal submission:
 4. Deploy `DeepstateRewarderFactory(GOVERNOR, V1_CONTROLLER, MINTER_CONTROLLER, USDG, FUNDING_BUDGET)`.
 5. Verify source, constructor immutables, runtime bytecode, ownership, and deployment provenance for all three.
 
-The first proposal's atomic payload is expected to:
+The first proposal's activation process is expected to:
 
 1. require users or keepers to have registered any needed V1 claimants and emptied both NVDA/USDG book sides before
-   execution, giving V1 its final hook callbacks;
-2. revoke every bypass token-level minter;
+   execution, giving V1 its final hook callbacks; these are separate operational transactions, not proposal actions;
+2. prove from the complete DEEP role-event history that no bypass token-level minter exists; if one is discovered, add
+   an explicit revoke action before the administration handoff and repin the payload;
 3. grant DEEP's default admin role to the Minter Controller and have the Governor renounce DEEP administration so the
    Controller is the sole default admin;
 4. call `lockTokenAdministration()` to validate the idle V1 market, create the execution-time accrued-emissions
@@ -179,6 +182,10 @@ The first proposal's atomic payload is expected to:
 6. call the Factory's owner-only migration with the exact V1 predecessor, reviewed NVDA quantity range, and both sides
    active, atomically creating and fully funding a 100-million/365-day V2; and
 7. set the approved Deepstate Inc Safe operator last.
+
+Only steps 3 through 7 are encoded in the eight-action atomic Governor execution. There is no Router pause, so a new
+order between cleanup and execution makes the execution revert safely; the book and legacy-cursor checks must be
+reopened immediately before broadcasting.
 
 The second proposal is expected to make one controlled 10-million-DEEP primary mint to the Governor, creating the
 corresponding Deepstate Inc stream, and then transfer the exact three volunteer allocations from the Governor.

@@ -30,14 +30,14 @@ campaign instead of silently discarding the action and its rolled-back evidence.
 | D-05 | Partial deployment is recoverable and a retry is idempotent. | Arbitrary partial-order deployment and recovery state machine using the canonical proxy runtime and the real release init code. |
 | D-06 | Deployment grants no governance permission and changes no external protocol state. | Deployment invariant records storage accesses and rejects writes to DEEP, Router, legacy Rewarder, USDG, Sablier, Governor, Safe, and other pinned dependencies; it also checks zero Controller roles/operator/counters/deadline/gross issuance and an uncreated legacy endowment after every deployment sequence. |
 | A-00 | The immutable legacy Rewarder identifies the reviewed Router, DEEP, pool, and two pool tokens, and sufficient 3-billion live/gross headroom exists. | Constructor/deployment identity checks, exact activation model, and deployment invariants. The final production values remain pinned-archive-fork preconditions. |
-| A-01 | As DEEP administration is atomically locked, exactly `floor((token0 totalAccrued + token1 totalAccrued) * 30 / 100)` is placed in one complete one-year stream. | Exact activation and Minter state machines check the one-shot snapshot fields, gross accounting, stream, duration, zero unlocks, and noncancelable/nontransferable flags. The eventual DGP-001 payload must repeat this against a pinned archive fork. |
+| A-01 | As DEEP administration is atomically locked, exactly `floor((token0 totalAccrued + token1 totalAccrued) * 30 / 100)` is placed in one complete one-year stream. | Exact activation and Minter state machines check the one-shot snapshot fields, gross accounting, stream, duration, zero unlocks, and noncancelable/nontransferable flags. The DGP-001 candidate repeats these assertions; the final deployed-state archive run remains a release gate. |
 | A-02 | Every temporary/bypass DEEP minter is revoked before controlled minting starts. | Exact activation model plus Minter state machine with three modeled legacy token minters. The live role-history checker supplies the exhaustive production inventory because OpenZeppelin roles are not enumerable onchain. |
 | A-03 | `lockTokenAdministration()` succeeds only with the Minter Controller as DEEP's sole default administrator and an exact idle legacy market; it creates the endowment before starting the 730-day term. | Exact activation and Minter phase/deadline/rollback invariants. |
 | A-04 | The volunteer primary allocation is exactly 10 million DEEP split into the three dictated amounts. | Exact activation economic invariant; the three balances sum exactly to 10 million base-unit precise DEEP. |
 | A-05 | The volunteer mint creates `floor(10M * 30 / 70)` in a separate one-year Inc stream. | Exact activation stream 3 and Controller gross-issuance invariants. |
 | A-06 | Factory receives only Controller-local mint authority and V1 hook authority; V1 Controller owns Router; approved Safe is operator. | Exact activation authority invariant and Factory authority state machine. Factory is asserted never to hold a DEEP token role. |
-| A-07 | The Router fee and two active hook flags are preserved while the exact V1 hook is replaced by the exact Factory-created V2. | Exact activation model checks the 10-bps fee, packed flags, predecessor, V2 address/configuration, Factory provenance, funding, and permissions. The concrete DGP must repeat these checks on a pinned fork. |
-| A-08 | DGP-001 succeeds only if the pool has no bid/ask top and V1 has no token0/token1 cursor; every action rolls back if replacement fails. | Factory migration unit/state-machine rollback properties and the exact activation composition model. A pinned proposal fork must additionally prove atomic Governor batch semantics. |
+| A-07 | The Router fee and two active hook flags are preserved while the exact V1 hook is replaced by the exact Factory-created V2. | Exact activation model checks the 10-bps fee, packed flags, predecessor, V2 address/configuration, Factory provenance, funding, and permissions. DGP-001 checks the public hook and fee state; its final archive test must also inspect the Router's packed side flags. |
+| A-08 | DGP-001 succeeds only if the pool has no bid/ask top and V1 has no token0/token1 cursor; every action rolls back if replacement fails. | Factory migration unit/state-machine rollback properties and the exact activation composition model. The DGP-001 candidate includes a real-Governor lifecycle and forced migration-failure rollback test; the final unmocked deployed-state archive run remains required. |
 | M-01 | Controlled minting is inactive before lock and at/after the exact 730-day deadline. | Minter phase, strict-window, exact-deadline, and permanent-expiry properties. |
 | M-02 | Only the Controller owner or explicit Controller-local minters can mint. | Random caller/role/ownership Minter state machine and exact activation unauthorized-caller campaign. |
 | M-03 | Every primary mint produces `floor(primary * 30 / 70)` in an independent one-year, zero-cliff, noncancelable, nontransferable stream. | Per-stream Minter invariant over every successful randomized mint. Rounding is below exact 30% only by less than one DEEP base unit when the primary amount is not divisible by seven. |
@@ -95,9 +95,11 @@ The suite exercises failure behavior for these assumptions but cannot guarantee 
 - Independent human review, a clean merged/tagged commit, and source/submodule provenance are release-process facts,
   not EVM state.
 
-Concrete DGP-001/002 scripts do not exist yet. The local exact-activation invariant proves the current contracts
-compose with the dictated order and amounts, but release readiness still requires exact payload tests against a pinned
-Robinhood archive block and durable post-execution assertions for the deployed addresses.
+DGP-001 now has a concrete eight-action script, pinned payload/description checks, submission and execution preflights,
+intermediate authorized-call assertions, immediate postconditions, a real-Governor lifecycle, and an atomic rollback
+test. Its current fork models the not-yet-completed operational idle handoff and locally deploys the deterministic
+targets; release readiness still requires actual deployment receipts, naturally idle live state, and a final unmocked
+run against a pinned Robinhood archive block. DGP-002 does not yet have a concrete script.
 
 ## Commands
 

@@ -61,12 +61,9 @@ contract DeployRewarderV2System is Script {
     bytes32 public constant MINTER_SALT = 0x304c43c720fd4782c53fdae386391a6648ceb66d5392726bdc48bc3afbb7e029;
     bytes32 public constant V1_CONTROLLER_SALT = 0x082f06fa60ca7855e107a32607127f39acece481342eb9696ae09f1139dbe01a;
     bytes32 public constant FACTORY_SALT = 0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a;
-    bytes32 public constant MINTER_RUNTIME_CODE_HASH =
-        0xea81d65604213d4ebecc4c3b97a6ff5a8b594e4ba619e5b6f4770a6a82d6144d;
-    bytes32 public constant V1_CONTROLLER_RUNTIME_CODE_HASH =
-        0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc;
-    bytes32 public constant FACTORY_RUNTIME_CODE_HASH =
-        0x562503d22d5b07c8a344b7e36c3257f635dece9879e3bbdcac0b643fbd2cc58e;
+    bytes32 public constant MINTER_RUNTIME_CODE_HASH = DeepstateAddresses.MINTER_CONTROLLER_CODEHASH;
+    bytes32 public constant V1_CONTROLLER_RUNTIME_CODE_HASH = DeepstateAddresses.V1_CONTROLLER_CODEHASH;
+    bytes32 public constant FACTORY_RUNTIME_CODE_HASH = DeepstateAddresses.REWARDER_FACTORY_CODEHASH;
 
     error CodeHashMismatch(address target, bytes32 expected, bytes32 actual);
     error Create2DeploymentFailed(address expected);
@@ -234,6 +231,13 @@ contract DeployRewarderV2System is Script {
     /// @dev Internal so tests can prove the checked runtime, immutable configuration, and mutable release scalars at
     /// an occupied target. Complete Controller role absence additionally requires the event-history release gate.
     function _validateExistingDeployments(DeploymentPlan memory plan) internal view {
+        if (
+            plan.minterController != DeepstateAddresses.MINTER_CONTROLLER
+                || plan.v1Controller != DeepstateAddresses.V1_CONTROLLER
+                || plan.rewarderFactory != DeepstateAddresses.REWARDER_FACTORY
+        ) {
+            revert InvalidDeployedConfiguration(DeepstateAddresses.CREATE2_DEPLOYER);
+        }
         if (plan.minterController.code.length != 0) _verifyMinterController(plan.minterController);
         if (plan.v1Controller.code.length != 0) _verifyV1Controller(plan.v1Controller);
         if (plan.rewarderFactory.code.length != 0) {
