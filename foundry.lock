@@ -1,0 +1,38 @@
+{
+  "lib/chainlink-contracts": {
+    "tag": {
+      "name": "1.3.0",
+      "rev": "5cb41fbc9b525338b6098da5ea7dd0b7e92f89e4"
+    }
+  },
+  "lib/deepstate-contracts": {
+    "rev": "37aa0d2ecb4a1f37a45b473729c100b2991c4e2d"
+  },
+  "lib/deepstate-protocol": {
+    "rev": "adfd9a8b662d7605c195d249b78e627b3aa87b6a"
+  },
+  "lib/forge-std": {
+    "tag": {
+      "name": "v1.16.1",
+      "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+  },
+  "lib/prb-math": {
+    "tag": {
+      "name": "v4.1.0",
+      "rev": "280fc5f77e1b21b9c54013aac51966be33f4a410"
+    }
+  },
+  "lib/sablier": {
+    "tag": {
+      "name": "lockup@v4.0.1",
+      "rev": "fae38dc7e43c6cab6de8f97124c559f42ed5b77a"
+    }
+  },
+  "lib/solady": {
+    "rev": "ab96a830e705de13e0f58cfaefadab4ac8257655"
+  }
+}

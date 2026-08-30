@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {DeepstateProposalScript} from "../../DeepstateProposalScript.s.sol";
+import {DeepstateAddresses} from "../../../src/DeepstateAddresses.sol";
+
+interface IProposalTarget {
+    function functionName(uint256 newValue) external;
+
+    function currentValue() external view returns (uint256);
+}
+
+contract DeployDGPXXX is DeepstateProposalScript {
+    error PostconditionFailed(uint256 actualValue, uint256 expectedValue);
+
+    string internal constant DESCRIPTION_PATH = "proposals/DGP-XXX.md";
+    address internal constant PROPOSER = 0x0000000000000000000000000000000000000000;
+    uint256 internal constant EXPECTED_PROPOSAL_ID = 0;
+
+    function proposer() public pure override returns (address) {
+        return PROPOSER;
+    }
+
+    function expectedProposalId() public pure override returns (uint256) {
+        return EXPECTED_PROPOSAL_ID;
+    }
+
+    function _buildProposal()
+        internal
+        view
+        override
+        returns (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description)
+    {
+        targets = new address[](1);
+        targets[0] = DeepstateAddresses.ROUTER;
+
+        values = new uint256[](1);
+
+        calldatas = new bytes[](1);
+        calldatas[0] = abi.encodeCall(IProposalTarget.functionName, (0));
+
+        description = vm.readFile(DESCRIPTION_PATH);
+    }
+
+    function _afterExecution() internal view override {
+        uint256 expectedValue = 0;
+        uint256 actualValue = IProposalTarget(DeepstateAddresses.ROUTER).currentValue();
+        if (actualValue != expectedValue) revert PostconditionFailed(actualValue, expectedValue);
+    }
+}

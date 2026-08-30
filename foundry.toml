@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+evm_version = "cancun"
+solc = "0.8.28"
+auto_detect_solc = false
+auto_detect_remappings = false
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+fs_permissions = [
+    { access = "read", path = "./proposals" },
+]
+
+[fmt]
+line_length = 120
+
+[rpc_endpoints]
+robinhood = "${ROBINHOOD_RPC_URL}"

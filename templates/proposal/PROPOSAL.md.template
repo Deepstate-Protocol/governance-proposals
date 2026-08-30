@@ -1,0 +1,37 @@
+# DGP-XXX: Proposal title
+
+| Review field | Value |
+| --- | --- |
+| Intended proposer | `REPLACE_WITH_PROPOSER` |
+| Reviewed fork block | `REPLACE_WITH_BLOCK_NUMBER` |
+| Reviewed fork block hash | `REPLACE_WITH_BLOCK_HASH` |
+
+## Summary
+
+Describe the requested governance action in plain language.
+
+## Motivation
+
+Explain why the action is necessary and why governance should approve it now.
+
+## Specification
+
+List every parameter and explain its effect.
+
+## Onchain actions
+
+| # | Target | Value | Function | Arguments |
+| ---: | --- | ---: | --- | --- |
+| 1 | `0x...` | `0 ETH` | `functionName(...)` | `...` |
+
+## Security considerations
+
+Describe authority changes, token flows, irreversible effects, and failure modes.
+
+## Verification
+
+State the preconditions and exact postconditions the proposal test asserts.
+
+## References
+
+- Link the relevant contracts, documentation, issue, discussion, or audit evidence.

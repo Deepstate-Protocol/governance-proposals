@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {Test} from "forge-std/Test.sol";
+
+import {DeployDGPXXX, IProposalTarget} from "../../../script/proposals/DGPXXX/Deploy.s.sol";
+import {DeepstateAddresses} from "../../../src/DeepstateAddresses.sol";
+import {IDeepstateGovernor} from "../../../src/interfaces/IDeepstateGovernor.sol";
+
+contract DGPXXXTest is Test {
+    uint256 internal constant FORK_BLOCK = 0;
+    bytes32 internal constant FORK_BLOCK_HASH = bytes32(0);
+    bytes32 internal constant EXPECTED_DESCRIPTION_HASH = bytes32(0);
+    address internal constant QUORUM_VOTER = address(0);
+
+    DeployDGPXXX internal proposal;
+
+    function setUp() public {
+        vm.createSelectFork(vm.rpcUrl("robinhood"), FORK_BLOCK + 1);
+        assertEq(blockhash(FORK_BLOCK), FORK_BLOCK_HASH);
+        vm.rollFork(FORK_BLOCK);
+        assertEq(block.number, FORK_BLOCK);
+        assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
+        proposal = new DeployDGPXXX();
+    }
+
+    function testProposalPayload() public view {
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
+            proposal.proposal();
+
+        assertEq(targets.length, 1);
+        assertEq(targets[0], DeepstateAddresses.ROUTER);
+        assertEq(values[0], 0);
+        assertEq(calldatas[0], abi.encodeCall(IProposalTarget.functionName, (0)));
+        assertEq(keccak256(bytes(description)), EXPECTED_DESCRIPTION_HASH);
+        assertEq(proposal.proposalId(), proposal.expectedProposalId());
+        assertGt(targets[0].code.length, 0);
+    }
+
+    /// @dev Tests target authorization and effects at the pinned pre-proposal block. The shared base tests the
+    /// entrypoint invariants; `testFullGovernorLifecycle` separately exercises the live Governor.
+    function testAuthorizedTargetCallsAndPostconditions() public {
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas,) = proposal.proposal();
+
+        uint256 totalValue;
+        for (uint256 i; i < values.length; ++i) {
+            totalValue += values[i];
+        }
+        vm.deal(DeepstateAddresses.GOVERNOR, DeepstateAddresses.GOVERNOR.balance + totalValue);
+
+        _assertPreconditions();
+
+        for (uint256 i; i < targets.length; ++i) {
+            vm.prank(DeepstateAddresses.GOVERNOR);
+            (bool success, bytes memory result) = targets[i].call{value: values[i]}(calldatas[i]);
+            assertTrue(success, string(result));
+        }
+
+        _assertPostconditions();
+    }
+
+    function testFullGovernorLifecycle() public {
+        IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
+            proposal.proposal();
+
+        vm.prank(proposal.proposer());
+        uint256 proposalId = governor.propose(targets, values, calldatas, description);
+        assertEq(proposalId, proposal.expectedProposalId());
+        assertEq(governor.proposalProposer(proposalId), proposal.proposer());
+        assertFalse(governor.proposalNeedsQueuing(proposalId));
+
+        uint256 snapshot = governor.proposalSnapshot(proposalId);
+        vm.warp(snapshot + 1);
+        assertGe(governor.getVotes(QUORUM_VOTER, snapshot), governor.quorum(snapshot));
+        vm.prank(QUORUM_VOTER);
+        governor.castVote(proposalId, 1);
+
+        vm.warp(governor.proposalDeadline(proposalId) + 1);
+        assertEq(governor.state(proposalId), 4);
+
+        uint256 totalValue;
+        for (uint256 i; i < values.length; ++i) {
+            totalValue += values[i];
+        }
+        vm.deal(address(this), address(this).balance + totalValue);
+        governor.execute{value: totalValue}(targets, values, calldatas, keccak256(bytes(description)));
+
+        assertEq(governor.state(proposalId), 7);
+        assertEq(proposal.verifyExecution(), proposalId);
+        _assertPostconditions();
+    }
+
+    function _assertPreconditions() internal view {
+        assertTrue(IProposalTarget(DeepstateAddresses.ROUTER).currentValue() != 0);
+    }
+
+    function _assertPostconditions() internal view {
+        assertEq(IProposalTarget(DeepstateAddresses.ROUTER).currentValue(), 0);
+    }
+}

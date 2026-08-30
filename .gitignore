@@ -1,0 +1,11 @@
+cache/
+out/
+
+# Preserve production-chain submission/execution evidence while ignoring local simulations.
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+.DS_Store
+.env
+lcov.info

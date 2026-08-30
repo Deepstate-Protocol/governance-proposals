@@ -1,0 +1,110 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+
+jobs:
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Required / Quality
+            check: quality
+          - name: Required / Behavioral Tests
+            check: behavioral-tests
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Run ${{ matrix.name }}
+        shell: bash
+        env:
+          CHECK: ${{ matrix.check }}
+        run: |
+          case "$CHECK" in
+            quality)
+              forge fmt --check
+              forge lint
+              bash -n script/check-dependency-layout.sh
+              bash -n script/check-live-deployment.sh
+              bash -n script/check-proposal-layout.sh
+              bash script/check-dependency-layout.sh
+              bash script/check-proposal-layout.sh
+              forge build --sizes --threads 0 --skip test --skip MockSablierLockupLinearV4.sol
+              ;;
+            behavioral-tests)
+              forge test --force --no-match-path 'test/proposals/**' -vvv --threads 0
+              ;;
+            *)
+              printf 'Unknown CI check: %s\n' "$CHECK" >&2
+              exit 1
+              ;;
+          esac
+
+  proposal-fork-tests:
+    name: Trusted / Proposal Fork Tests
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Detect concrete proposals
+        id: proposals
+        shell: bash
+        run: |
+          if compgen -G 'test/proposals/DGP*/Proposal.t.sol' >/dev/null; then
+            printf 'present=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'No concrete proposal fork tests yet.\n'
+          fi
+
+      - name: Install Foundry
+        if: steps.proposals.outputs.present == 'true'
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Run proposal fork tests
+        if: steps.proposals.outputs.present == 'true'
+        shell: bash
+        env:
+          ROBINHOOD_ARCHIVE_RPC_URL: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_URL }}
+        run: |
+          if [[ -z "${ROBINHOOD_ARCHIVE_RPC_URL:-}" ]]; then
+            printf 'ROBINHOOD_ARCHIVE_RPC_URL is required for pinned proposal fork tests.\n' >&2
+            exit 1
+          fi
+          ROBINHOOD_RPC_URL="$ROBINHOOD_ARCHIVE_RPC_URL" \
+            forge test --force --match-path 'test/proposals/*/Proposal.t.sol' -vvv --threads 0
