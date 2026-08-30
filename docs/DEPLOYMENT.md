@@ -23,7 +23,9 @@ code, address, or both. Regenerate and review the plan after every such change.
 The canonical values are in [`DeepstateAddresses.sol`](../script/config/DeepstateAddresses.sol). The preflight checker pins all
 runtime code hashes needed by the deployment, proxy implementations for USDG and the Sablier Comptroller, the NVDA
 beacon implementation used by the baseline pool, the 1-of-1 Deepstate Inc Safe, and DEEP's complete role-event history
-from its creation block.
+from its creation block. It also requires Sablier Lockup's one-time `nativeToken` not to be DEEP; that configuration
+would make future DEEP stream creation revert. The slot is currently unset, while any permanently selected non-DEEP
+token would also satisfy this invariant.
 
 Sablier's official Robinhood Lockup v4 is `0x548129a58bC230549DF7F9e33f27E77F6779ff0f`, deployed at block
 10,420,411. It is wired to replacement Comptroller proxy `0x12d70713796A9460314C282c613DE307FdED1a36`, version `v1.1`;

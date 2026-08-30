@@ -14,10 +14,13 @@ contract DeepstateV1Controller is DeepstateController {
     event DeepstateFeeConfigured(address indexed recipient, uint16 bps);
     event DeepstateOwnershipTransferred(address indexed newOwner);
 
+    error InvalidDeepstateOwner();
+
     error InvalidDeepstate();
 
     constructor(address owner_, address deepstate_) DeepstateController(owner_) {
         if (deepstate_ == address(0) || deepstate_.code.length == 0) revert InvalidDeepstate();
+        if (owner_ == deepstate_) revert InvalidDeepstateOwner();
 
         deepstate = IDeepstateV1(deepstate_);
     }
@@ -38,7 +41,14 @@ contract DeepstateV1Controller is DeepstateController {
 
     /// @notice Return router ownership to governance or another governance-approved owner.
     function transferDeepstateOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(deepstate)) revert InvalidDeepstateOwner();
         deepstate.transferOwnership(newOwner);
         emit DeepstateOwnershipTransferred(newOwner);
+    }
+
+    /// @dev Router ownership of this controller would form an unrecoverable ownership cycle.
+    function _setOwner(address newOwner) internal override {
+        if (newOwner == address(deepstate)) revert InvalidDeepstateOwner();
+        super._setOwner(newOwner);
     }
 }

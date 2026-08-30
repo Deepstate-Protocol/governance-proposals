@@ -78,6 +78,13 @@ Factory operations pause whenever the Factory, Minter Controller, and V1 Control
 Direct and two-step Factory ownership transfers succeed only after both controllers already share the proposed new
 owner, preventing a partially completed governance rotation from leaving the operator active across split authority.
 
+Ownership and delegated authority are intentionally independent. All three governance contracts retain Solady's
+immediate ownership-transfer path and optional recipient-requested handover path; production ownership changes are
+Governor actions reviewed and executed through governance. Neither path implicitly revokes the Minter Controller's
+`MINTER_ROLE`, the V1 Controller's `HOOK_MANAGER_ROLE`, or the Factory operator. A governance migration must explicitly
+inventory those authorities and atomically revoke any delegate that should not survive before transferring ownership;
+Factory operations remain paused until all three owners are aligned.
+
 | Parameter | Value |
 | --- | ---: |
 | Initial primary funding | `150_000_000e18` DEEP |

@@ -347,6 +347,13 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(factory.owner(), alice);
         assertEq(deepstateV1Controller.owner(), alice);
         assertEq(minterController.owner(), alice);
+        assertEq(factory.operator(), operator);
+        assertTrue(minterController.hasAnyRole(address(factory), minterController.MINTER_ROLE()));
+        assertTrue(deepstateV1Controller.hasAnyRole(address(factory), deepstateV1Controller.HOOK_MANAGER_ROLE()));
+
+        vm.prank(operator);
+        DeepstateRewarderV2 rewarder = factory.deployMarket(_market(address(stockA)));
+        assertEq(factory.activeRewarder(rewarder.poolId()), address(rewarder));
 
         vm.prank(alice);
         factory.setOperator(address(0));

@@ -25,6 +25,18 @@ contract DeploymentVerificationHarness is DeployRewarderV2System {
 
 contract DeploymentCodeMock {}
 
+contract DeploymentDeepstateTokenMock {
+    function totalSupply() external pure virtual returns (uint256) {
+        return 0;
+    }
+}
+
+contract DeploymentDeepstateTokenWithoutHeadroomMock is DeploymentDeepstateTokenMock {
+    function totalSupply() external pure override returns (uint256) {
+        return DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP - 3;
+    }
+}
+
 contract DeploymentUSDGMock {
     function decimals() external pure returns (uint8) {
         return 6;
@@ -74,15 +86,15 @@ contract DeploymentV1DependencyWithRoleMock is DeploymentV1DependencyMock {
 contract DeployRewarderV2SystemTest is Test {
     string internal constant MANIFEST = "deployments/robinhood-4663/rewarder-v2.template.json";
 
-    address internal constant EXPECTED_MINTER = 0x3512C0E8B66e463df1cE6f55BE829Bf1ECA5b1c4;
-    address internal constant EXPECTED_V1_CONTROLLER = 0x268E83228EDf691950b9458f200710A2b61AD996;
-    address internal constant EXPECTED_FACTORY = 0x9ec28aE171d3280dE9B295A134126935C2451A00;
+    address internal constant EXPECTED_MINTER = 0xafEB36106788d1b891f47e433beBa479800a8E5C;
+    address internal constant EXPECTED_V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
+    address internal constant EXPECTED_FACTORY = 0x7831d1C8408CB8E67e5B48c2df8a0b56C2A7aD47;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
-        0x3cd9754bbae0a797f4df364af5b4b0be2dcef16f75994ac079327af19e056526;
+        0x4df9de0c05ed644527afe7c80d33708f7009de31c18e7d0336d02c0c7c477c63;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
-        0xd25f79f39af86cde5d8b6d9cf38db7fcae0d60ff5a8d7ee9cdb4fa062d0a9e7f;
+        0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0x7f6374300b3536877670c4cd06424afb331996c66ef87626dd0c745e7477810a;
+        0xa1c63d094d5186d3933089bb40b053f2dc7815a5aa5910f1fcd7f7426550f51a;
 
     DeployRewarderV2System internal deployment;
     DeploymentVerificationHarness internal verificationHarness;
@@ -154,11 +166,15 @@ contract DeployRewarderV2SystemTest is Test {
             vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.factoryInitialPrimaryFundingBudget")),
             DeepstateAddresses.FACTORY_INITIAL_PRIMARY_FUNDING_BUDGET
         );
+        assertNotEq(
+            vm.parseJsonAddress(manifest, ".liveDependencies.sablierLockupV4.nativeToken"), DeepstateAddresses.DEEP
+        );
     }
 
     function test_ExistingMinterMustBePristine() public {
         DeploymentCodeMock codeMock = new DeploymentCodeMock();
-        vm.etch(DeepstateAddresses.DEEP, address(codeMock).code);
+        DeploymentDeepstateTokenMock tokenMock = new DeploymentDeepstateTokenMock();
+        vm.etch(DeepstateAddresses.DEEP, address(tokenMock).code);
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         DeepstateMinterController controller = new DeepstateMinterController(
             DeepstateAddresses.GOVERNOR,
@@ -170,6 +186,15 @@ contract DeployRewarderV2SystemTest is Test {
         );
 
         verificationHarness.verifyMinterController(address(controller));
+
+        DeploymentDeepstateTokenWithoutHeadroomMock tokenWithoutHeadroom =
+            new DeploymentDeepstateTokenWithoutHeadroomMock();
+        vm.etch(DeepstateAddresses.DEEP, address(tokenWithoutHeadroom).code);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeployRewarderV2System.InvalidDeployedConfiguration.selector, address(controller))
+        );
+        verificationHarness.verifyMinterController(address(controller));
+        vm.etch(DeepstateAddresses.DEEP, address(tokenMock).code);
 
         vm.store(address(controller), bytes32(uint256(0)), bytes32(uint256(1)));
         vm.expectRevert(

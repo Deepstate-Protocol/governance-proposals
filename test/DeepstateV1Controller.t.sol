@@ -44,6 +44,9 @@ contract DeepstateV1ControllerTest is Test {
 
         vm.expectRevert(DeepstateV1Controller.InvalidDeepstate.selector);
         new DeepstateV1Controller(address(this), alice);
+
+        vm.expectRevert(DeepstateV1Controller.InvalidDeepstateOwner.selector);
+        new DeepstateV1Controller(address(deepstate), address(deepstate));
     }
 
     function test_GovernanceCanGrantAndRevokeHookManagerRole() public {
@@ -145,6 +148,26 @@ contract DeepstateV1ControllerTest is Test {
         emit DeepstateV1Controller.DeepstateOwnershipTransferred(alice);
         controller.transferDeepstateOwnership(alice);
         assertEq(deepstate.owner(), alice);
+    }
+
+    function test_GovernanceCannotCreatePermanentRouterOwnershipDeadlocks() public {
+        vm.expectRevert(DeepstateV1Controller.InvalidDeepstateOwner.selector);
+        controller.transferOwnership(address(deepstate));
+
+        vm.prank(address(deepstate));
+        controller.requestOwnershipHandover();
+        vm.expectRevert(DeepstateV1Controller.InvalidDeepstateOwner.selector);
+        controller.completeOwnershipHandover(address(deepstate));
+
+        vm.expectRevert(DeepstateV1Controller.InvalidDeepstateOwner.selector);
+        controller.transferDeepstateOwnership(address(deepstate));
+
+        assertEq(controller.owner(), address(this));
+        assertEq(deepstate.owner(), address(controller));
+        controller.setDeepstateFeeConfig(feeRecipient, 10);
+        (address recipient, uint16 bps) = deepstate.feeConfig();
+        assertEq(recipient, feeRecipient);
+        assertEq(bps, 10);
     }
 
     function test_ControllerCallsFailUntilItOwnsRouter() public {

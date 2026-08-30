@@ -24,6 +24,9 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     uint256 public constant MINTER_ROLE = 1 << 0;
     uint256 public constant RECIPIENT_ALLOCATION_BPS = 30_00;
     uint256 public constant PRIMARY_ALLOCATION_BPS = 70_00;
+    /// @notice Smallest combined primary-plus-vesting issuance accepted by `mint`.
+    /// @dev A primary amount of 3 base units produces the first nonzero vesting amount (1 base unit).
+    uint256 public constant MINIMUM_COMBINED_ISSUANCE = 4;
     uint40 public constant VESTING_DURATION = 365 days;
     uint40 public constant TOKEN_ADMINISTRATION_DURATION = 2 * 365 days;
 
@@ -87,8 +90,13 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         }
         if (sablierLockup_ == address(0) || sablierLockup_.code.length == 0) revert InvalidSablierLockup();
         if (recipient_ == address(0)) revert InvalidRecipient();
-        if (mintCap_ == 0) revert InvalidMintCap();
-        if (grossIssuanceCap_ == 0) revert InvalidGrossIssuanceCap();
+        if (
+            mintCap_ < MINIMUM_COMBINED_ISSUANCE
+                || DeepstateToken(deepstateToken_).totalSupply() > mintCap_ - MINIMUM_COMBINED_ISSUANCE
+        ) {
+            revert InvalidMintCap();
+        }
+        if (grossIssuanceCap_ < MINIMUM_COMBINED_ISSUANCE) revert InvalidGrossIssuanceCap();
 
         deepstateToken = DeepstateToken(deepstateToken_);
         sablierLockup = ISablierLockupLinearV4(sablierLockup_);
