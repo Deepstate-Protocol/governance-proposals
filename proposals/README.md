@@ -2,7 +2,8 @@
 
 No proposal is ready to submit yet. DGP-001 has a numbered, exact payload candidate and matching tests, but its three
 deterministic target contracts are not deployed and its final unmocked archive-fork release test is outstanding.
-DGP-002 remains voter-facing draft text without a payload.
+DGP-002 has an exact three-mint payload candidate and a sequential DGP-001-to-DGP-002 fork suite; it must be repinned
+to a real post-DGP-001 production block after DGP-001 executes.
 
 Voter-facing text that has been dictated but does not yet have a deployable, fully tested payload is preserved under
 `proposals/drafts/`. A draft moves into this directory only when its matching deployment script and pinned-fork test
@@ -20,4 +21,4 @@ restriction before computing the description hash and pinned proposal ID.
 | Proposal | Status | Summary |
 | --- | --- | --- |
 | [`DGP-001`](DGP-001.md) | Pre-deployment payload candidate | Establish the Deepstate Inc endowment, activate controlled minting, and atomically replace the live Rewarder with Rewarder V2. |
-| [`DGP-002`](drafts/DGP-002.md) | Draft | Allocate exactly 10 million DEEP to three volunteer team members. |
+| [`DGP-002`](DGP-002.md) | Sequential pre-deployment payload candidate | Allocate exactly 10 million DEEP to three volunteer team members through three controlled mints. |

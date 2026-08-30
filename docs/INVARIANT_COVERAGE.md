@@ -99,7 +99,10 @@ DGP-001 now has a concrete eight-action script, pinned payload/description check
 intermediate authorized-call assertions, immediate postconditions, a real-Governor lifecycle, and an atomic rollback
 test. Its current fork models the not-yet-completed operational idle handoff and locally deploys the deterministic
 targets; release readiness still requires actual deployment receipts, naturally idle live state, and a final unmocked
-run against a pinned Robinhood archive block. DGP-002 does not yet have a concrete script.
+run against a pinned Robinhood archive block. DGP-002 has a concrete three-action script, exact per-recipient mint and
+per-call vesting arithmetic, real-Governor DGP-001-then-DGP-002 execution, three-stream assertions, immediate
+postconditions, and a final-mint rollback test. Its sequential fork inherits DGP-001's pre-deployment and mocked-idle
+limitations; release readiness requires repinning it to a real archive block after production DGP-001 execution.
 
 ## Commands
 

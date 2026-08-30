@@ -4,7 +4,8 @@ Foundry project for authoring, reviewing, simulating, and submitting proposals t
 repository contains the hardened Rewarder V2 release candidate and deterministic deployment tooling, but no
 submission-ready governance proposal yet. DGP-001 now has an exact executable payload candidate and proposal-specific
 tests; it remains blocked from submission until the system contracts are deployed, receipts are recorded, the live
-market is prepared, and the final archive-fork lifecycle test passes. DGP-002 remains a dictated draft.
+market is prepared, and the final archive-fork lifecycle test passes. DGP-002 now has an exact three-mint payload and
+sequential fork suite, but must be repinned to a real production block after DGP-001 executes.
 
 The project follows the Solidity and deployment conventions in
 [`deepstate-contracts`](https://github.com/Deepstate-Protocol/deepstate-contracts) and
@@ -27,8 +28,9 @@ manifest template, pinned live dependencies, a live Sablier compatibility test, 
 Governor payload with a provisional pre-deployment ID. The payload is deliberately not submission-ready until its
 predicted targets are actual reviewed deployments and the final archive-fork release gates pass. See
 [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
-the production release procedure. The proposal-specific external transaction sequence is recorded in
-[`docs/DGP-001-TRANSACTION-RUNBOOK.md`](docs/DGP-001-TRANSACTION-RUNBOOK.md).
+the production release procedure. The proposal-specific external transaction sequences are recorded in
+[`docs/DGP-001-TRANSACTION-RUNBOOK.md`](docs/DGP-001-TRANSACTION-RUNBOOK.md) and
+[`docs/DGP-002-TRANSACTION-RUNBOOK.md`](docs/DGP-002-TRANSACTION-RUNBOOK.md).
 
 The current release policy caps live DEEP supply and permanent Controller issuance at 3 billion DEEP. DGP-001 will
 atomically create a one-year endowment equal to 30% of the legacy Rewarder's execution-time accrued emissions, activate

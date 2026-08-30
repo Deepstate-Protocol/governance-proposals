@@ -83,7 +83,8 @@ contract DeepstateActivationConditionsHandler is Test {
     uint256 public constant VOLUNTEER_A_AMOUNT = 3_333_333_333333333333333334;
     uint256 public constant VOLUNTEER_B_AMOUNT = 3_333_333_333333333333333333;
     uint256 public constant VOLUNTEER_C_AMOUNT = 3_333_333_333333333333333333;
-    uint256 public constant VOLUNTEER_VESTING = 4_285_714_285714285714285714;
+    uint256 public constant VOLUNTEER_STREAM_VESTING = 1_428_571_428571428571428571;
+    uint256 public constant VOLUNTEER_VESTING = 3 * VOLUNTEER_STREAM_VESTING;
     uint256 public constant MARKET_PRIMARY = 100_000_000e18;
     uint256 public constant MARKET_VESTING = 42_857_142_857142857142857142;
     uint256 public constant LIVE_AND_GROSS_CAP = 3_000_000_000e18;
@@ -277,11 +278,10 @@ contract DeepstateActivationConditionsHandler is Test {
     }
 
     function _executeVolunteerAllocation() internal {
-        minterController.mint(address(this), VOLUNTEER_PRIMARY);
         assertEq(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT, VOLUNTEER_PRIMARY);
-        assertTrue(deep.transfer(VOLUNTEER_A, VOLUNTEER_A_AMOUNT));
-        assertTrue(deep.transfer(VOLUNTEER_B, VOLUNTEER_B_AMOUNT));
-        assertTrue(deep.transfer(VOLUNTEER_C, VOLUNTEER_C_AMOUNT));
+        minterController.mint(VOLUNTEER_A, VOLUNTEER_A_AMOUNT);
+        minterController.mint(VOLUNTEER_B, VOLUNTEER_B_AMOUNT);
+        minterController.mint(VOLUNTEER_C, VOLUNTEER_C_AMOUNT);
     }
 
     function _assertFailedWithoutMutation(address actor, address target, bytes memory callData) internal {
@@ -357,7 +357,7 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
 
     function invariant_ExactEndowmentAndVolunteerEconomicsRemainTrue() public view {
         assertFalse(handler.unauthorizedMutation());
-        assertEq(sablier.nextStreamId(), 4);
+        assertEq(sablier.nextStreamId(), 6);
         assertEq(
             handler.ENDOWMENT(),
             (uint256(handler.LEGACY_TOKEN0_ACCRUED()) + uint256(handler.LEGACY_TOKEN1_ACCRUED())) * 30 / 100
@@ -367,10 +367,12 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         _assertLinearStream(endowment, address(minterController), handler.ENDOWMENT(), "Deepstate Inc endowment");
         MockSablierLockupLinearV4.Stream memory marketVesting = sablier.stream(2);
         _assertLinearStream(marketVesting, address(minterController), handler.MARKET_VESTING(), "Deepstate allocation");
-        MockSablierLockupLinearV4.Stream memory volunteerVesting = sablier.stream(3);
-        _assertLinearStream(
-            volunteerVesting, address(minterController), handler.VOLUNTEER_VESTING(), "Deepstate allocation"
-        );
+        for (uint256 streamId = 3; streamId <= 5; ++streamId) {
+            MockSablierLockupLinearV4.Stream memory volunteerVesting = sablier.stream(streamId);
+            _assertLinearStream(
+                volunteerVesting, address(minterController), handler.VOLUNTEER_STREAM_VESTING(), "Deepstate allocation"
+            );
+        }
 
         assertEq(deep.balanceOf(handler.VOLUNTEER_A()), handler.VOLUNTEER_A_AMOUNT());
         assertEq(deep.balanceOf(handler.VOLUNTEER_B()), handler.VOLUNTEER_B_AMOUNT());

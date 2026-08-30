@@ -153,7 +153,8 @@ pinned DEEP token.
 ## Candidate activation sequence
 
 DGP-001 combines the endowment, controlled-minting activation, delegated Factory authority, and V1-to-V2 replacement
-in one atomic Governor execution. DGP-002 remains the separate volunteer allocation. The exact DGP-001 payload is now
+in one atomic Governor execution. DGP-002 remains the separate volunteer allocation and now has its own exact
+three-mint payload plus sequential fork suite. The exact DGP-001 payload is now
 encoded as a pre-deployment candidate; its submission preflight intentionally rejects missing target deployments,
 configuration drift, insufficient cap headroom, or incompatible Sablier state. Market idleness is deliberately checked
 immediately before execution so the market does not need to remain unavailable throughout the voting period.
