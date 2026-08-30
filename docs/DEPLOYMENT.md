@@ -20,7 +20,7 @@ code, address, or both. Regenerate and review the plan after every such change.
 
 ## Live trust anchors
 
-The canonical values are in [`DeepstateAddresses.sol`](../src/DeepstateAddresses.sol). The preflight checker pins all
+The canonical values are in [`DeepstateAddresses.sol`](../script/config/DeepstateAddresses.sol). The preflight checker pins all
 runtime code hashes needed by the deployment, proxy implementations for USDG and the Sablier Comptroller, the NVDA
 beacon implementation used by the baseline pool, the 1-of-1 Deepstate Inc Safe, and DEEP's complete role-event history
 from its creation block.

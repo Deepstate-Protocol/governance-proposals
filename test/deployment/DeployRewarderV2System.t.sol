@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {DeployRewarderV2System} from "../../script/DeployRewarderV2System.s.sol";
-import {DeepstateAddresses} from "../../src/DeepstateAddresses.sol";
+import {DeepstateAddresses} from "../../script/config/DeepstateAddresses.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../src/DeepstateRewarderFactory.sol";
 import {DeepstateV1Controller} from "../../src/DeepstateV1Controller.sol";

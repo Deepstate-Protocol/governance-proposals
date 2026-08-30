@@ -38,7 +38,7 @@ authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the productio
 | Public RPC | `https://rpc.mainnet.chain.robinhood.com/` |
 | Explorer | [robinhoodchain.blockscout.com](https://robinhoodchain.blockscout.com/) |
 
-The full documented deployment is recorded in [`DeepstateAddresses.sol`](src/DeepstateAddresses.sol). The address
+The full documented deployment is recorded in [`DeepstateAddresses.sol`](script/config/DeepstateAddresses.sol). The address
 source is the [Deepstate documentation](https://deepstate.sh/docs), specifically its
 [Network & Addresses](https://docs-production-cdea.up.railway.app/contracts/deployments/) page, which says the
 production addresses were recorded on August 16, 2026. Run `make check-live` before authoring or
@@ -71,10 +71,10 @@ src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and fac
 src/DeepstateRewarderV2.sol            candidate market rewarder implementation
 lib/deepstate-contracts/               pinned matching-engine source dependency
 lib/deepstate-protocol/                pinned protocol source, including the inherited Rewarder base
-src/DeepstateAddresses.sol             canonical live deployment registry
 src/DeepstateProposal.sol              deterministic payload validation and proposal ID
 script/DeepstateProposalScript.s.sol   chain, Governor, STATE, and launch preflight
 script/DeployRewarderV2System.s.sol    read-only plan and guarded idempotent CREATE2 deployment
+script/config/DeepstateAddresses.sol   canonical live deployment and release-policy registry
 deployments/robinhood-4663/            production release manifest template and completed records
 docs/DEPLOYMENT.md                     deployment, verification, and activation runbook
 templates/proposal/                     files copied for each new proposal

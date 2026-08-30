@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {SablierLockup} from "@sablier/lockup/src/SablierLockup.sol";
 
-import {DeepstateAddresses} from "../../src/DeepstateAddresses.sol";
+import {DeepstateAddresses} from "../../script/config/DeepstateAddresses.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 

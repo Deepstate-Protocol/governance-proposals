@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ADDRESS_REGISTRY="$ROOT_DIR/src/DeepstateAddresses.sol"
+ADDRESS_REGISTRY="$ROOT_DIR/script/config/DeepstateAddresses.sol"
 RPC_URL="${ROBINHOOD_RPC_URL:-https://rpc.mainnet.chain.robinhood.com/}"
 SNAPSHOT_BLOCK="${1:-}"
 DEFAULT_ADMIN_ROLE=0x0000000000000000000000000000000000000000000000000000000000000000

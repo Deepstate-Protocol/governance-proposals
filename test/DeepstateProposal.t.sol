@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {DeepstateProposalScript} from "../script/DeepstateProposalScript.s.sol";
-import {DeepstateAddresses} from "../src/DeepstateAddresses.sol";
+import {DeepstateAddresses} from "../script/config/DeepstateAddresses.sol";
 import {DeepstateProposal} from "../src/DeepstateProposal.sol";
 
 contract MockDeepstateGovernor {

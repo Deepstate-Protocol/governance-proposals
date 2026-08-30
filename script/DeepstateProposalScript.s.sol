@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {DeepstateAddresses} from "../src/DeepstateAddresses.sol";
+import {DeepstateAddresses} from "./config/DeepstateAddresses.sol";
 import {DeepstateProposal} from "../src/DeepstateProposal.sol";
 import {IDeepstateGovernor} from "../src/interfaces/IDeepstateGovernor.sol";
 

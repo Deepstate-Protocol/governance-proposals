@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {DeepstateProposalScript} from "../../DeepstateProposalScript.s.sol";
-import {DeepstateAddresses} from "../../../src/DeepstateAddresses.sol";
+import {DeepstateAddresses} from "../../config/DeepstateAddresses.sol";
 
 interface IProposalTarget {
     function functionName(uint256 newValue) external;
