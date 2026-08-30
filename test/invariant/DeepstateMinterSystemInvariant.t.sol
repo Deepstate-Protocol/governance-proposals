@@ -9,11 +9,71 @@ import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 import {MockSablierLockupLinearV4} from "../mocks/MockSablierLockupLinearV4.sol";
 
+contract MinterInvariantLegacyRouter {
+    mapping(bytes32 poolId => address hook) public poolHook;
+    mapping(bytes32 bookId => mapping(bool isBid => uint32 nonce)) internal _topNonce;
+    mapping(bytes32 bookId => mapping(bool isBid => uint160 soldAmount)) internal _topAmount;
+
+    function activeBookId(address token0, address token1) public pure returns (bytes32) {
+        return keccak256(abi.encode(token0, token1, uint256(0)));
+    }
+
+    function topOrder(bytes32 bookId, bool isBid) external view returns (uint32 nonce, uint160 soldAmount) {
+        return (_topNonce[bookId][isBid], _topAmount[bookId][isBid]);
+    }
+
+    function setPoolHook(bytes32 poolId, address hook) external {
+        poolHook[poolId] = hook;
+    }
+
+    function setTopOrder(bytes32 bookId, bool isBid, uint32 nonce, uint160 soldAmount) external {
+        _topNonce[bookId][isBid] = nonce;
+        _topAmount[bookId][isBid] = soldAmount;
+    }
+}
+
+contract MinterInvariantLegacyRewarder {
+    address public immutable rewardToken;
+    address public immutable deepstate;
+    address public constant token0 = address(0x3001);
+    address public constant token1 = address(0x3002);
+    bytes32 public constant poolId = keccak256(abi.encode(token0, token1));
+    uint96 public token0Accrued = 700e18;
+    uint96 public token1Accrued = 300e18;
+    mapping(address token => uint32 nonce) internal _rewardeeNonce;
+    mapping(address token => uint64 startedAt) internal _rewardeeStartedAt;
+
+    constructor(address rewardToken_, address deepstate_) {
+        rewardToken = rewardToken_;
+        deepstate = deepstate_;
+    }
+
+    function totalAccrued(address token) external view returns (uint96) {
+        if (token == token0) return token0Accrued;
+        if (token == token1) return token1Accrued;
+        return 0;
+    }
+
+    function setTotalAccrued(uint96 token0Accrued_, uint96 token1Accrued_) external {
+        token0Accrued = token0Accrued_;
+        token1Accrued = token1Accrued_;
+    }
+
+    function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt) {
+        return (_rewardeeNonce[token], _rewardeeStartedAt[token]);
+    }
+
+    function setRewardee(address token, uint32 nonce, uint64 startedAt) external {
+        _rewardeeNonce[token] = nonce;
+        _rewardeeStartedAt[token] = startedAt;
+    }
+}
+
 /// @dev Stateful model for the complete DEEP administration term. The handler deliberately exposes both valid and
 /// invalid calls so the invariant campaign continuously tests authorization, phase boundaries and atomic rollback.
 contract DeepstateMinterSystemHandler is Test {
-    uint256 public constant LIVE_SUPPLY_CAP = 2_000_000e18;
-    uint256 public constant GROSS_ISSUANCE_CAP = 1_000_000e18;
+    uint256 public constant LIVE_SUPPLY_CAP = 3_000_000_000e18;
+    uint256 public constant GROSS_ISSUANCE_CAP = 3_000_000_000e18;
 
     address public constant GOVERNANCE_A = address(0xA11CE);
     address public constant GOVERNANCE_B = address(0xB0B);
@@ -29,6 +89,8 @@ contract DeepstateMinterSystemHandler is Test {
     DeepstateToken public immutable deep;
     DeepstateMinterController public immutable controller;
     MockSablierLockupLinearV4 public immutable sablier;
+    MinterInvariantLegacyRouter public immutable legacyRouter;
+    MinterInvariantLegacyRewarder public immutable legacyRewarder;
 
     // 0: not activated, 1: activated (including an elapsed-but-not-returned term), 2: administration returned.
     uint8 public phase;
@@ -38,6 +100,7 @@ contract DeepstateMinterSystemHandler is Test {
     uint40 public expectedEndsAt;
 
     uint256 public externalIssued;
+    uint256 public legacyEndowmentIssued;
     uint256 public primaryIssued;
     uint256 public vestingIssued;
     uint256 public totalBurned;
@@ -46,6 +109,7 @@ contract DeepstateMinterSystemHandler is Test {
     uint256 public externalMinterRevocations;
     uint40 public lastSuccessfulMintAt;
     bool public lastMintSucceeded;
+    uint8 public legacyPreconditionFault;
 
     mapping(address account => bool enabled) public expectedControllerMinter;
     mapping(uint256 streamId => uint256 amount) public primaryAmountForStream;
@@ -53,8 +117,17 @@ contract DeepstateMinterSystemHandler is Test {
     constructor() {
         deep = new DeepstateToken(GOVERNANCE_A, "Deepstate", "DEEP");
         sablier = new MockSablierLockupLinearV4();
+        legacyRouter = new MinterInvariantLegacyRouter();
+        legacyRewarder = new MinterInvariantLegacyRewarder(address(deep), address(legacyRouter));
+        legacyRouter.setPoolHook(legacyRewarder.poolId(), address(legacyRewarder));
         controller = new DeepstateMinterController(
-            GOVERNANCE_A, address(deep), address(sablier), VESTING_RECIPIENT, LIVE_SUPPLY_CAP, GROSS_ISSUANCE_CAP
+            GOVERNANCE_A,
+            address(deep),
+            address(sablier),
+            address(legacyRewarder),
+            VESTING_RECIPIENT,
+            LIVE_SUPPLY_CAP,
+            GROSS_ISSUANCE_CAP
         );
 
         // Model legacy token-level minters that the activation proposal must remove before starting the term.
@@ -63,6 +136,35 @@ contract DeepstateMinterSystemHandler is Test {
         deep.grantRole(deep.MINTER_ROLE(), MINTER_B);
         deep.grantRole(deep.MINTER_ROLE(), MINTER_C);
         vm.stopPrank();
+    }
+
+    /// @dev Randomizes the exact cumulative legacy accrual sampled by the one-time activation call.
+    function setLegacyAccrual(uint96 rawToken0Accrued, uint96 rawToken1Accrued) external {
+        if (phase != 0) return;
+        uint96 token0Accrued = uint96(bound(uint256(rawToken0Accrued), 0, 5_000_000_000e18));
+        uint96 token1Accrued = uint96(bound(uint256(rawToken1Accrued), 0, 5_000_000_000e18));
+        legacyRewarder.setTotalAccrued(token0Accrued, token1Accrued);
+    }
+
+    /// @dev Randomizes whether the live legacy market satisfies the lock's fail-closed idle-state preconditions.
+    function setLegacyPreconditionFault(uint8 rawFault) external {
+        if (phase != 0) return;
+        uint8 fault = rawFault % 6;
+        legacyPreconditionFault = fault;
+
+        bytes32 poolId = legacyRewarder.poolId();
+        bytes32 bookId = legacyRouter.activeBookId(legacyRewarder.token0(), legacyRewarder.token1());
+        legacyRouter.setPoolHook(poolId, address(legacyRewarder));
+        legacyRouter.setTopOrder(bookId, true, 0, 0);
+        legacyRouter.setTopOrder(bookId, false, 0, 0);
+        legacyRewarder.setRewardee(legacyRewarder.token0(), 0, 0);
+        legacyRewarder.setRewardee(legacyRewarder.token1(), 0, 0);
+
+        if (fault == 1) legacyRouter.setPoolHook(poolId, address(0xBAD));
+        else if (fault == 2) legacyRouter.setTopOrder(bookId, true, 1, 1);
+        else if (fault == 3) legacyRouter.setTopOrder(bookId, false, 1, 1);
+        else if (fault == 4) legacyRewarder.setRewardee(legacyRewarder.token0(), 1, 1);
+        else if (fault == 5) legacyRewarder.setRewardee(legacyRewarder.token1(), 1, 1);
     }
 
     /// @dev Exercises legacy issuance before activation and proves that the same accounts cannot bypass the controller
@@ -89,11 +191,49 @@ contract DeepstateMinterSystemHandler is Test {
         }
     }
 
-    /// @dev Represents the required governance ordering: make the controller sole token admin, revoke every known
-    /// bypass minter, then start the two-year clock last.
+    /// @dev Represents the atomic governance ordering: snapshot and stream the endowment, make the controller sole
+    /// token admin, revoke every known bypass minter, then start the two-year clock last.
     function activate() external {
         if (phase != 0) return;
 
+        uint96 token0Accrued = legacyRewarder.token0Accrued();
+        uint96 token1Accrued = legacyRewarder.token1Accrued();
+        uint256 endowmentAmount = Math.mulDiv(uint256(token0Accrued) + uint256(token1Accrued), 30_00, 10_000);
+        bool shouldSucceed = endowmentAmount != 0 && endowmentAmount <= GROSS_ISSUANCE_CAP
+            && endowmentAmount <= LIVE_SUPPLY_CAP - deep.totalSupply() && !sablier.revertCreate()
+            && legacyPreconditionFault == 0;
+
+        (bool success,) = address(this).call(abi.encodeCall(this.executeAtomicActivation, ()));
+        assertEq(success, shouldSucceed, "activation acceptance mismatch");
+        if (!success) {
+            assertFalse(controller.legacyEndowmentCreated(), "failed activation retained endowment state");
+            assertEq(controller.grossIssued(), 0, "failed activation changed gross issuance");
+            assertFalse(
+                deep.hasRole(deep.MINTER_ROLE(), address(controller)), "failed activation retained controller minter"
+            );
+            assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), GOVERNANCE_A), "failed activation stranded token admin");
+            assertFalse(
+                deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)),
+                "failed activation retained controller admin"
+            );
+            for (uint256 i; i < 3; ++i) {
+                assertTrue(deep.hasRole(deep.MINTER_ROLE(), _minter(i)), "failed activation revoked legacy minter");
+            }
+            return;
+        }
+
+        legacyEndowmentIssued = endowmentAmount;
+        phase = 1;
+        activationStartedAt = uint40(block.timestamp);
+        expectedEndsAt = uint40(block.timestamp + controller.TOKEN_ADMINISTRATION_DURATION());
+        assertEq(controller.tokenAdministrationEndsAt(), expectedEndsAt, "incorrect administration deadline");
+        assertEq(controller.legacyToken0Accrued(), token0Accrued, "token0 accrual snapshot mismatch");
+        assertEq(controller.legacyToken1Accrued(), token1Accrued, "token1 accrual snapshot mismatch");
+        assertEq(controller.legacyEndowmentAmount(), endowmentAmount, "legacy endowment mismatch");
+    }
+
+    function executeAtomicActivation() external {
+        require(msg.sender == address(this), "only self");
         bytes32 tokenAdminRole = deep.DEFAULT_ADMIN_ROLE();
         vm.prank(GOVERNANCE_A);
         deep.grantRole(tokenAdminRole, address(controller));
@@ -116,11 +256,6 @@ contract DeepstateMinterSystemHandler is Test {
 
         vm.prank(expectedOwner);
         controller.lockTokenAdministration();
-
-        phase = 1;
-        activationStartedAt = uint40(block.timestamp);
-        expectedEndsAt = uint40(block.timestamp + controller.TOKEN_ADMINISTRATION_DURATION());
-        assertEq(controller.tokenAdministrationEndsAt(), expectedEndsAt, "incorrect administration deadline");
     }
 
     function setControllerMinter(uint8 accountSeed, bool enabled) external {
@@ -343,19 +478,21 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         controller = handler.controller();
         sablier = handler.sablier();
 
-        bytes4[] memory selectors = new bytes4[](12);
+        bytes4[] memory selectors = new bytes4[](14);
         selectors[0] = handler.externalTokenMint.selector;
-        selectors[1] = handler.activate.selector;
-        selectors[2] = handler.setControllerMinter.selector;
-        selectors[3] = handler.renounceControllerMinter.selector;
-        selectors[4] = handler.rotateGovernance.selector;
-        selectors[5] = handler.attemptInvalidOwnershipChanges.selector;
-        selectors[6] = handler.attemptUnauthorizedRoleMutation.selector;
-        selectors[7] = handler.setSablierFailure.selector;
-        selectors[8] = handler.mint.selector;
-        selectors[9] = handler.burn.selector;
-        selectors[10] = handler.advanceTime.selector;
-        selectors[11] = handler.unlock.selector;
+        selectors[1] = handler.setLegacyAccrual.selector;
+        selectors[2] = handler.setLegacyPreconditionFault.selector;
+        selectors[3] = handler.activate.selector;
+        selectors[4] = handler.setControllerMinter.selector;
+        selectors[5] = handler.renounceControllerMinter.selector;
+        selectors[6] = handler.rotateGovernance.selector;
+        selectors[7] = handler.attemptInvalidOwnershipChanges.selector;
+        selectors[8] = handler.attemptUnauthorizedRoleMutation.selector;
+        selectors[9] = handler.setSablierFailure.selector;
+        selectors[10] = handler.mint.selector;
+        selectors[11] = handler.burn.selector;
+        selectors[12] = handler.advanceTime.selector;
+        selectors[13] = handler.unlock.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
@@ -366,10 +503,13 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
         if (phase == 0) {
             assertEq(endsAt, 0);
+            assertFalse(controller.legacyEndowmentCreated());
+            assertEq(controller.grossIssued(), 0);
             assertEq(deep.defaultAdminCount(), 1);
             assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_A()));
             assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)));
         } else if (phase == 1) {
+            assertTrue(controller.legacyEndowmentCreated());
             assertEq(endsAt, handler.expectedEndsAt());
             assertEq(endsAt, handler.activationStartedAt() + controller.TOKEN_ADMINISTRATION_DURATION());
             assertEq(deep.defaultAdminCount(), 1);
@@ -379,6 +519,7 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
             assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_C()));
         } else {
             assertEq(phase, 2);
+            assertTrue(controller.legacyEndowmentCreated());
             assertEq(endsAt, type(uint40).max);
             assertEq(deep.defaultAdminCount(), 1);
             assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.returnedTokenAdmin()));
@@ -412,7 +553,7 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
     function invariant_MintAccountingRespectsBothPermanentCaps() public view {
         uint256 gross = controller.grossIssued();
-        assertEq(gross, handler.primaryIssued() + handler.vestingIssued());
+        assertEq(gross, handler.legacyEndowmentIssued() + handler.primaryIssued() + handler.vestingIssued());
         assertLe(gross, controller.grossIssuanceCap());
         assertLe(deep.totalSupply(), controller.mintCap());
         assertEq(deep.totalSupply() + handler.totalBurned(), handler.externalIssued() + gross);
@@ -420,12 +561,29 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
     function invariant_EveryMintHasAnExactIndependentOneYearStream() public view {
         uint256 nextStreamId = sablier.nextStreamId();
-        assertEq(nextStreamId - 1, handler.successfulMints());
+        uint256 endowmentStreamCount = controller.legacyEndowmentCreated() ? 1 : 0;
+        assertEq(nextStreamId - 1, handler.successfulMints() + endowmentStreamCount);
 
         uint256 summedPrimary;
         uint256 summedVesting;
         for (uint256 streamId = 1; streamId < nextStreamId; ++streamId) {
             MockSablierLockupLinearV4.Stream memory created = sablier.stream(streamId);
+            if (streamId == controller.legacyEndowmentStreamId()) {
+                assertEq(created.funder, address(controller));
+                assertEq(created.sender, address(controller));
+                assertEq(created.recipient, handler.VESTING_RECIPIENT());
+                assertEq(created.token, address(deep));
+                assertEq(created.depositAmount, handler.legacyEndowmentIssued());
+                assertFalse(created.cancelable);
+                assertFalse(created.transferable);
+                assertEq(keccak256(bytes(created.shape)), keccak256("Deepstate Inc endowment"));
+                assertEq(created.startUnlockAmount, 0);
+                assertEq(created.cliffUnlockAmount, 0);
+                assertEq(created.granularity, 0);
+                assertEq(created.cliffDuration, 0);
+                assertEq(created.totalDuration, 365 days);
+                continue;
+            }
             uint256 primaryAmount = handler.primaryAmountForStream(streamId);
             uint256 expectedVesting = Math.mulDiv(primaryAmount, 30_00, 70_00);
 
@@ -450,7 +608,7 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
         assertEq(summedPrimary, handler.primaryIssued());
         assertEq(summedVesting, handler.vestingIssued());
-        assertEq(deep.balanceOf(address(sablier)), summedVesting);
+        assertEq(deep.balanceOf(address(sablier)), handler.legacyEndowmentIssued() + summedVesting);
         assertEq(deep.balanceOf(address(controller)), 0);
         assertEq(deep.allowance(address(controller), address(sablier)), 0);
     }
@@ -466,6 +624,23 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
             assertEq(controller.grossIssued(), 0);
             assertEq(sablier.nextStreamId(), 1);
         }
+    }
+
+    function invariant_LegacyEndowmentIsOneTimeExactAndPrecedesTheAdministrationTerm() public view {
+        if (!controller.legacyEndowmentCreated()) {
+            assertEq(handler.phase(), 0);
+            assertEq(controller.legacyEndowmentAmount(), 0);
+            assertEq(controller.legacyEndowmentStreamId(), 0);
+            return;
+        }
+
+        uint256 totalAccrued = uint256(controller.legacyToken0Accrued()) + uint256(controller.legacyToken1Accrued());
+        uint256 expectedEndowment = Math.mulDiv(totalAccrued, 30_00, 10_000);
+        assertEq(controller.legacyEndowmentAmount(), expectedEndowment);
+        assertEq(handler.legacyEndowmentIssued(), expectedEndowment);
+        assertEq(controller.legacyEndowmentSnapshotAt(), handler.activationStartedAt());
+        assertEq(controller.legacyEndowmentStreamId(), 1);
+        assertTrue(handler.phase() == 1 || handler.phase() == 2);
     }
 
     function invariant_ExpirationReturnsAuthorityAndPermanentlyDisablesControllerMinting() public view {
@@ -485,26 +660,78 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         bool failed = handler.mint(0, 0, 70e18);
         assertFalse(failed);
         assertEq(handler.failedSablierMints(), 1);
-        assertEq(deep.totalSupply(), 0);
-        assertEq(controller.grossIssued(), 0);
-        assertEq(sablier.nextStreamId(), 1);
+        assertEq(deep.totalSupply(), handler.legacyEndowmentIssued());
+        assertEq(controller.grossIssued(), handler.legacyEndowmentIssued());
+        assertEq(sablier.nextStreamId(), 2);
 
         handler.setSablierFailure(false);
         bool succeeded = handler.mint(0, 0, 70e18);
         assertTrue(succeeded);
-        assertEq(deep.totalSupply(), 100e18);
-        assertEq(controller.grossIssued(), 100e18);
+        assertEq(deep.totalSupply(), handler.legacyEndowmentIssued() + 100e18);
+        assertEq(controller.grossIssued(), handler.legacyEndowmentIssued() + 100e18);
+        assertEq(sablier.nextStreamId(), 3);
+    }
+
+    function test_StatefulHarnessActivationRequiresNonzeroAtomicEndowment() public {
+        handler.setLegacyAccrual(0, 0);
+        handler.activate();
+
+        assertEq(handler.phase(), 0);
+        assertFalse(controller.legacyEndowmentCreated());
+        assertEq(controller.grossIssued(), 0);
+        assertEq(deep.totalSupply(), 0);
+        assertEq(sablier.nextStreamId(), 1);
+        assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
+
+        handler.setLegacyAccrual(700e18, 300e18);
+        handler.setSablierFailure(true);
+        handler.activate();
+        assertEq(handler.phase(), 0);
+        assertFalse(controller.legacyEndowmentCreated());
+        assertEq(deep.totalSupply(), 0);
+        assertEq(sablier.nextStreamId(), 1);
+
+        handler.setSablierFailure(false);
+        handler.activate();
+        assertEq(handler.phase(), 1);
+        assertTrue(controller.legacyEndowmentCreated());
+        assertEq(controller.legacyEndowmentAmount(), 300e18);
+        assertEq(controller.grossIssued(), 300e18);
+        assertEq(deep.totalSupply(), 300e18);
         assertEq(sablier.nextStreamId(), 2);
+    }
+
+    function test_StatefulHarnessRejectsEveryNonIdleLegacyMarketStateAtomically() public {
+        for (uint8 fault = 1; fault < 6; ++fault) {
+            handler.setLegacyPreconditionFault(fault);
+            handler.activate();
+
+            assertEq(handler.phase(), 0);
+            assertFalse(controller.legacyEndowmentCreated());
+            assertEq(controller.tokenAdministrationEndsAt(), 0);
+            assertEq(controller.grossIssued(), 0);
+            assertEq(deep.totalSupply(), 0);
+            assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_A()));
+            assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)));
+            assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
+        }
+
+        handler.setLegacyPreconditionFault(0);
+        handler.activate();
+        assertEq(handler.phase(), 1);
+        assertTrue(controller.legacyEndowmentCreated());
     }
 
     function test_StatefulHarnessGrossCapCannotBeReopenedByBurning() public {
         handler.activate();
         handler.setControllerMinter(0, true);
 
-        assertTrue(handler.mint(0, 0, 700_000e18));
+        uint256 remainingGross = handler.GROSS_ISSUANCE_CAP() - handler.legacyEndowmentIssued();
+        uint256 primaryToFillGross = Math.mulDiv(remainingGross, 70_00, 100_00);
+        assertTrue(handler.mint(0, 0, primaryToFillGross));
         assertEq(controller.grossIssued(), handler.GROSS_ISSUANCE_CAP());
-        handler.burn(0, 700_000e18);
-        assertEq(deep.totalSupply(), 300_000e18);
+        handler.burn(0, primaryToFillGross);
+        assertEq(deep.totalSupply(), handler.legacyEndowmentIssued() + remainingGross - primaryToFillGross);
         assertFalse(handler.mint(0, 0, 3));
         assertEq(controller.grossIssued(), handler.GROSS_ISSUANCE_CAP());
     }

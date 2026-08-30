@@ -9,7 +9,6 @@ ZERO_ADDRESS=0x0000000000000000000000000000000000000000
 SAFE_MODULES_SENTINEL=0x0000000000000000000000000000000000000001
 ERC1967_IMPLEMENTATION_SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
 SABLIER_PROTOCOL_LOCKUP=2
-MINIMUM_COMBINED_ISSUANCE=4
 
 require_command() {
     local command_name="$1"
@@ -39,25 +38,36 @@ decimal_greater_than_or_equal() {
     [[ "$left" == "$right" || "$left" > "$right" ]]
 }
 
-decimal_subtract_digit() {
+decimal_subtract() {
     local value="${1#${1%%[!0]*}}"
-    local borrow="$2"
+    local subtrahend="${2#${2%%[!0]*}}"
+    local borrow=0
     local result=""
     local index
+    local subtrahend_index
     local digit
+    local subtrahend_digit
     local difference
     value="${value:-0}"
-    if (( borrow < 0 || borrow > 9 )); then
-        printf 'decimal_subtract_digit only supports a one-digit subtrahend\n' >&2
+    subtrahend="${subtrahend:-0}"
+    if ! decimal_greater_than_or_equal "$value" "$subtrahend"; then
+        printf 'Cannot subtract decimal value %s from %s\n' "$subtrahend" "$value" >&2
         exit 1
     fi
+    subtrahend_index=$((${#subtrahend} - 1))
     for ((index = ${#value} - 1; index >= 0; --index)); do
         digit="${value:index:1}"
-        difference=$((10#$digit - borrow))
-        borrow=0
+        subtrahend_digit=0
+        if (( subtrahend_index >= 0 )); then
+            subtrahend_digit="${subtrahend:subtrahend_index:1}"
+            ((subtrahend_index -= 1)) || true
+        fi
+        difference=$((10#$digit - 10#$subtrahend_digit - borrow))
         if (( difference < 0 )); then
             difference=$((difference + 10))
             borrow=1
+        else
+            borrow=0
         fi
         result="${difference}${result}"
     done
@@ -85,7 +95,7 @@ solidity_uint() {
     local value
     local coefficient
     local exponent
-    value="$(sed -nE "s/.*constant ${name} = ([0-9_]+(e[0-9_]+)?);/\1/p" "$ADDRESS_REGISTRY")"
+    value="$(sed -nE "s/.*constant ${name} = ([0-9_]+(e[0-9_]+)?);.*/\1/p" "$ADDRESS_REGISTRY")"
     if [[ -z "$value" ]]; then
         printf 'Unable to read %s from %s\n' "$name" "$ADDRESS_REGISTRY" >&2
         exit 1
@@ -163,6 +173,16 @@ require_distinct_address() {
     fi
 }
 
+require_uint() {
+    local label="$1"
+    local actual="$2"
+    local expected="$3"
+    if [[ "$actual" != "$expected" ]]; then
+        printf '%s mismatch: expected %s, received %s\n' "$label" "$expected" "$actual" >&2
+        exit 1
+    fi
+}
+
 require_command cast
 
 EXPECTED_CHAIN_ID="$(solidity_uint CHAIN_ID)"
@@ -190,6 +210,14 @@ EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD="$(solidity_uint SABLIER_LOCKUP_MIN_FEE_USD)
 EXPECTED_SABLIER_MAX_FEE_USD="$(solidity_uint SABLIER_MAX_FEE_USD)"
 EXPECTED_SABLIER_COMPTROLLER_VERSION="$(solidity_string SABLIER_COMPTROLLER_VERSION)"
 EXPECTED_MINTER_LIVE_SUPPLY_CAP="$(solidity_uint MINTER_LIVE_SUPPLY_CAP)"
+EXPECTED_MINTER_GROSS_ISSUANCE_CAP="$(solidity_uint MINTER_GROSS_ISSUANCE_CAP)"
+EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM="$(solidity_uint MINIMUM_ACTIVATION_ISSUANCE_HEADROOM)"
+EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP="$(solidity_uint LEGACY_REWARDER_SIDE_EMISSION_CAP)"
+EXPECTED_LEGACY_REWARDER_EMISSION_DURATION="$(solidity_uint LEGACY_REWARDER_EMISSION_DURATION)"
+EXPECTED_LEGACY_USDG_START_QUANTITY="$(solidity_uint LEGACY_USDG_START_QUANTITY)"
+EXPECTED_LEGACY_USDG_MAX_QUANTITY="$(solidity_uint LEGACY_USDG_MAX_QUANTITY)"
+EXPECTED_LEGACY_NVDA_START_QUANTITY="$(solidity_uint LEGACY_NVDA_START_QUANTITY)"
+EXPECTED_LEGACY_NVDA_MAX_QUANTITY="$(solidity_uint LEGACY_NVDA_MAX_QUANTITY)"
 GOVERNOR="$(solidity_address GOVERNOR)"
 DEEP="$(solidity_address DEEP)"
 STATE="$(solidity_address STATE)"
@@ -291,11 +319,18 @@ require_distinct_address \
 
 deep_total_supply="$(rpc_uint "$DEEP" 'totalSupply()(uint256)')"
 maximum_supply_with_minimum_headroom="$(
-    decimal_subtract_digit "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" "$MINIMUM_COMBINED_ISSUANCE"
+    decimal_subtract "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"
 )"
 if ! decimal_greater_than_or_equal "$maximum_supply_with_minimum_headroom" "$deep_total_supply"; then
-    printf 'DEEP supply leaves less than %s base units under the mint cap: supply %s, cap %s\n' \
-        "$MINIMUM_COMBINED_ISSUANCE" "$deep_total_supply" "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" >&2
+    printf 'DEEP supply leaves less than the required %s base-unit activation headroom: supply %s, cap %s\n' \
+        "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" "$deep_total_supply" \
+        "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" >&2
+    exit 1
+fi
+if ! decimal_greater_than_or_equal \
+    "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"; then
+    printf 'Minter gross issuance cap %s is below required activation issuance %s\n' \
+        "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" >&2
     exit 1
 fi
 
@@ -394,6 +429,54 @@ require_address \
 require_address "STATE owner" "$(rpc_call "$STATE" 'owner()(address)')" "$GOVERNOR"
 require_address "Router owner" "$(rpc_call "$ROUTER" 'owner()(address)')" "$GOVERNOR"
 require_address "Rewarder owner" "$(rpc_call "$REWARDER" 'owner()(address)')" "$GOVERNOR"
+require_address "Legacy Rewarder Router" "$(rpc_call "$REWARDER" 'deepstate()(address)')" "$ROUTER"
+require_address "Legacy Rewarder reward token" "$(rpc_call "$REWARDER" 'rewardToken()(address)')" "$DEEP"
+require_address "Legacy Rewarder token0" "$(rpc_call "$REWARDER" 'token0()(address)')" "$USDG"
+require_address "Legacy Rewarder token1" "$(rpc_call "$REWARDER" 'token1()(address)')" "$NVDA"
+
+legacy_rewarder_pool_id="$(rpc_call "$REWARDER" 'poolId()(bytes32)')"
+if [[ "$legacy_rewarder_pool_id" != "$EXPECTED_NVDA_USDG_POOL_ID" ]]; then
+    printf 'Legacy Rewarder pool ID mismatch: expected %s, received %s\n' \
+        "$EXPECTED_NVDA_USDG_POOL_ID" "$legacy_rewarder_pool_id" >&2
+    exit 1
+fi
+require_uint \
+    "Legacy Rewarder side emission cap" \
+    "$(rpc_uint "$REWARDER" 'sideEmissionCap()(uint96)')" \
+    "$EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP"
+require_uint \
+    "Legacy Rewarder emission duration" \
+    "$(rpc_uint "$REWARDER" 'emissionDuration()(uint32)')" \
+    "$EXPECTED_LEGACY_REWARDER_EMISSION_DURATION"
+require_uint \
+    "Legacy Rewarder USDG start quantity" \
+    "$(rpc_uint "$REWARDER" 'token0StartQuantity()(uint160)')" \
+    "$EXPECTED_LEGACY_USDG_START_QUANTITY"
+require_uint \
+    "Legacy Rewarder USDG maximum quantity" \
+    "$(rpc_uint "$REWARDER" 'token0MaxQuantity()(uint160)')" \
+    "$EXPECTED_LEGACY_USDG_MAX_QUANTITY"
+require_uint \
+    "Legacy Rewarder NVDA start quantity" \
+    "$(rpc_uint "$REWARDER" 'token1StartQuantity()(uint160)')" \
+    "$EXPECTED_LEGACY_NVDA_START_QUANTITY"
+require_uint \
+    "Legacy Rewarder NVDA maximum quantity" \
+    "$(rpc_uint "$REWARDER" 'token1MaxQuantity()(uint160)')" \
+    "$EXPECTED_LEGACY_NVDA_MAX_QUANTITY"
+
+legacy_usdg_total_accrued="$(rpc_uint "$REWARDER" 'totalAccrued(address)(uint96)' "$USDG")"
+legacy_nvda_total_accrued="$(rpc_uint "$REWARDER" 'totalAccrued(address)(uint96)' "$NVDA")"
+if ! decimal_greater_than_or_equal "$EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP" "$legacy_usdg_total_accrued"; then
+    printf 'Legacy Rewarder USDG accrued amount exceeds its side cap: %s > %s\n' \
+        "$legacy_usdg_total_accrued" "$EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP" >&2
+    exit 1
+fi
+if ! decimal_greater_than_or_equal "$EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP" "$legacy_nvda_total_accrued"; then
+    printf 'Legacy Rewarder NVDA accrued amount exceeds its side cap: %s > %s\n' \
+        "$legacy_nvda_total_accrued" "$EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP" >&2
+    exit 1
+fi
 
 router_fee_config="$(rpc_call "$ROUTER" 'feeConfig()(address,uint16)')"
 router_fee_recipient="$(sed -n '1p' <<<"$router_fee_config")"
@@ -503,6 +586,8 @@ printf '  Sablier replacement Comptroller: %s (%s, Lockup fee %s USD units)\n' \
 printf '  deterministic CREATE2 deployer: %s\n' "$CREATE2_DEPLOYER"
 printf '  Router fee: %s bps to %s\n' "$router_fee_bps" "$STATE"
 printf '  NVDA/USDG hook: %s\n' "$REWARDER"
+printf '  legacy Rewarder total accrued: USDG %s, NVDA %s\n' \
+    "$legacy_usdg_total_accrued" "$legacy_nvda_total_accrued"
 printf '  governance start: %s (2026-08-30T07:23:58Z)\n' "$governance_start"
 printf '  governance status at snapshot: %s\n' "$governance_status"
 printf '  proposal threshold: %s\n' "$proposal_threshold"

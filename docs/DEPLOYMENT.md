@@ -9,11 +9,13 @@ fork-tested governance payloads.
 
 These are governance-selected conservative limits, not facts discovered from the live protocol:
 
-- the Minter Controller rejects a mint that would raise live DEEP supply above 20 billion DEEP;
-- it also rejects aggregate primary-plus-vesting issuance through the Controller above 20 billion DEEP, and burns do
+- the Minter Controller rejects a mint that would raise live DEEP supply above 3 billion DEEP;
+- it also rejects aggregate issuance through the Controller above 3 billion DEEP, including the one-time legacy
+  emissions endowment, and burns do
   not restore that gross allowance; and
-- the Factory has a 1.5 billion DEEP lifetime **primary** initial-funding budget. At 150 million primary DEEP per new
-  market, that permits exactly ten initial launches. Retiring a market does not restore budget.
+- the Factory has a 1 billion DEEP lifetime **primary** funding budget. Each Rewarder is fully funded with 100 million
+  primary DEEP for a 100-million maximum schedule over exactly 365 days, permitting exactly ten markets including the
+  migrated NVDA/USDG market. Retiring a market does not restore budget.
 
 Changing any policy constant, constructor, compiler setting, source file, or linked library changes the CREATE2 init
 code, address, or both. Regenerate and review the plan after every such change.
@@ -119,27 +121,47 @@ Do not mark a manifest `deployed` while any transaction, block, runtime hash, or
 ## Governance activation order and role inventory
 
 Deployment and activation are separate review gates. Before Minter activation, the Governor is DEEP's sole default
-admin and no address has DEEP's token-level `MINTER_ROLE`. `lockTokenAdministration()` succeeds only after governance
-has made the Minter Controller DEEP's **sole** default admin; it then grants the Controller its operational token-level
-minter role and starts the exact 730-day clock. No controlled mint can occur before that lock, and minting stops at the
-deadline.
+admin and no address has DEEP's token-level `MINTER_ROLE`. Governance must revoke every unexpected token-level minter,
+grant DEEP's default-admin role to the Minter Controller, and have the Governor renounce that role.
 
-For Factory activation, governance must separately:
+`lockTokenAdministration()` succeeds only when the Minter Controller is DEEP's **sole** default admin and the exact
+legacy market is still installed and idle. In one call it grants itself DEEP's token-level minter role, samples both
+live V1 `totalAccrued` counters, mints `floor(totalAccrued * 30 / 100)`, creates the complete one-year stream, and only
+then starts the exact 730-day clock. The complete call reverts on any failed identity, idleness, cap, token, or Sablier
+condition. No ordinary controlled mint can occur before that lock, and minting stops at the deadline. If governance
+transfers DEEP administration but activation cannot complete, the owner-only
+`returnPreActivationTokenAdministration()` recovery returns administration to the Governor and removes any controller
+minter role; it is permanently unavailable after successful activation.
+
+The same DGP-001 Governor execution must then:
 
 - give the Factory only the Minter Controller's delegated mint role;
 - give it only the V1 Controller's hook-manager role;
 - transfer Router ownership to the V1 Controller; and
+- call the owner-only `migrateMarket` path with the exact live V1 Rewarder, the reviewed NVDA ramp, and both sides
+  active; and
 - set the Deepstate Inc Safe as the revocable Factory operator.
+
+The migration is allowed only when the Router still reports the exact expected predecessor, both sides of the active
+book are empty, both legacy Rewarder cursors are zero, and the predecessor identifies the same Router, pool, tokens,
+and DEEP reward token. It clears V1, deploys and fully funds V2 with 100 million DEEP, creates the corresponding
+`floor(100 million * 30 / 70)` one-year stream, and installs the V2 hook inside one Factory call. Any failed condition,
+mint, Sablier interaction, deployment, or hook installation reverts the complete Governor execution.
 
 The Factory must never own either Controller or receive DEEP's token-level minter/admin roles. The operator must never
 own the Factory or either Controller. Governance retains fee configuration, Controller ownership, Factory ownership,
-operator revocation, 850 million DEEP market top-ups, and eventual return of DEEP administration.
+owner-only hook migration, operator revocation, and eventual return of DEEP administration. There is no market top-up
+function: 100 million DEEP is both the one-time funding and the complete maximum reward schedule.
 
-Every proposal script must encode and test the exact order of calls. In particular, governance must mint and stream the
-initial 300 million DEEP endowment first, while the Governor still administers DEEP; only afterward may it hand sole
-administration to the Minter Controller and call `lockTokenAdministration()` to start the 730-day controlled-minting
-term. Proposal fork tests should assert every intermediate role count as well as final roles, because a final-state-only
-assertion can miss a temporarily over-privileged call order.
+Every proposal script must encode and test the exact order of calls. DGP-001 combines the dynamic endowment, sole token
+administration, controller lock, delegated Factory permissions, Router custody, exact V1-to-V2 migration, and operator
+appointment in one atomic Governor execution. Proposal fork tests should assert every intermediate role count as well
+as final roles, because a final-state-only assertion can miss a temporarily over-privileged call order.
+
+The live V1 Rewarder cannot be retired, swept, or seeded into V2. Emptying both book sides before execution gives it its
+final hook callbacks and makes the handoff safe, but its unused DEEP balance remains in that immutable contract and its
+already-recorded historical claims remain available. V2 begins a new 100-million schedule; it does not inherit V1's
+395-day clock, balances, cursors, or accrual counters.
 
 ## Post-activation verification
 
@@ -149,8 +171,11 @@ Pin a post-activation block and hash, then verify at minimum:
 - Minter `tokenAdministrationEndsAt`, sole DEEP admin status, token-level minter status, live/gross caps, gross issued,
   exact stream parameters, and zero residual allowance/balance not explained by a stream;
 - V1 Controller ownership of the Router with the original fee recipient and 10 bps fee unchanged;
-- Factory owner, operator, immutable USDG, 1.5 billion primary budget, zero or expected committed budget, and exact
+- Factory owner, operator, immutable USDG, 1 billion primary budget, exactly 100 million committed by the migrated
+  first market, its 50-million-per-side caps and 365-day duration, and exact
   delegated roles on both Controllers;
+- the exact previous V1 address, idle migration preconditions from the execution block, new V2 hook and side flags,
+  unchanged Router fee, and the V1 residual balance and claimability limitation;
 - no unexpected DEEP admin or token-level minter; and
 - proposal IDs, description hashes, execution transaction hashes, and all proposal-specific balance/stream outcomes.
 

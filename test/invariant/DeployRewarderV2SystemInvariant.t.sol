@@ -24,6 +24,12 @@ contract OfflineDeploymentUSDGMock {
     }
 }
 
+contract OfflineDeploymentLegacyRewarderMock {
+    function rewardToken() external pure returns (address) {
+        return DeepstateAddresses.DEEP;
+    }
+}
+
 contract DeployRewarderV2SystemInvariantHarness is DeployRewarderV2System {
     function deployMinterFromPlan() external {
         DeploymentPlan memory plan = _plan();
@@ -89,10 +95,12 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
         OfflineDeploymentCodeMock codeMock = new OfflineDeploymentCodeMock();
         OfflineDeploymentDeepMock deepMock = new OfflineDeploymentDeepMock();
         OfflineDeploymentUSDGMock usdGMock = new OfflineDeploymentUSDGMock();
+        OfflineDeploymentLegacyRewarderMock legacyRewarderMock = new OfflineDeploymentLegacyRewarderMock();
 
         vm.etch(DeepstateAddresses.DEEP, address(deepMock).code);
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.ROUTER, address(codeMock).code);
+        vm.etch(DeepstateAddresses.REWARDER, address(legacyRewarderMock).code);
         vm.etch(DeepstateAddresses.USDG, address(usdGMock).code);
         vm.etch(DeepstateAddresses.CREATE2_DEPLOYER, CREATE2_PROXY_RUNTIME);
     }
@@ -149,6 +157,7 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
         _flagWrites(DeepstateAddresses.GOVERNOR);
         _flagWrites(DeepstateAddresses.DEEP);
         _flagWrites(DeepstateAddresses.ROUTER);
+        _flagWrites(DeepstateAddresses.REWARDER);
         _flagWrites(DeepstateAddresses.USDG);
         _flagWrites(DeepstateAddresses.USDG_IMPLEMENTATION);
         _flagWrites(DeepstateAddresses.SABLIER_LOCKUP);
@@ -165,15 +174,15 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 }
 
 contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
-    address internal constant EXPECTED_MINTER = 0xafEB36106788d1b891f47e433beBa479800a8E5C;
+    address internal constant EXPECTED_MINTER = 0x48D047816c4b2B083998Aa8ff7da01BD0f429944;
     address internal constant EXPECTED_V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
-    address internal constant EXPECTED_FACTORY = 0x7831d1C8408CB8E67e5B48c2df8a0b56C2A7aD47;
+    address internal constant EXPECTED_FACTORY = 0xf02b7ba0317dD1a88f1793EC75382AC4F3bA9266;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
-        0x4df9de0c05ed644527afe7c80d33708f7009de31c18e7d0336d02c0c7c477c63;
+        0x3e845810a412e1180499612841cd0aae0f5e6c6b558910f6eb5252a60d76a859;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
         0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0xa1c63d094d5186d3933089bb40b053f2dc7815a5aa5910f1fcd7f7426550f51a;
+        0x20015b9f826d1dedc33763faf70ab9dca3c8c2530afece06ee810e9cc6ef35f0;
 
     DeployRewarderV2SystemInvariantHandler internal handler;
     DeployRewarderV2SystemInvariantHarness internal deployment;
@@ -236,7 +245,15 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         if (EXPECTED_MINTER.code.length != 0) {
             DeepstateMinterController minter = DeepstateMinterController(EXPECTED_MINTER);
             assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
+            assertEq(address(minter.legacyRewarder()), DeepstateAddresses.REWARDER);
             assertEq(minter.grossIssued(), 0);
+            assertFalse(minter.legacyEndowmentCreated());
+            assertEq(minter.legacyEndowmentSnapshotBlock(), 0);
+            assertEq(minter.legacyEndowmentSnapshotAt(), 0);
+            assertEq(minter.legacyToken0Accrued(), 0);
+            assertEq(minter.legacyToken1Accrued(), 0);
+            assertEq(minter.legacyEndowmentAmount(), 0);
+            assertEq(minter.legacyEndowmentStreamId(), 0);
             assertEq(minter.tokenAdministrationEndsAt(), 0);
         }
         if (EXPECTED_V1_CONTROLLER.code.length != 0) {
@@ -247,7 +264,7 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
             assertEq(factory.owner(), DeepstateAddresses.GOVERNOR);
             assertEq(factory.operator(), address(0));
             assertEq(factory.nextDeploymentAt(), 0);
-            assertEq(factory.initialFundingCommitted(), 0);
+            assertEq(factory.fundingCommitted(), 0);
             assertEq(DeepstateMinterController(EXPECTED_MINTER).rolesOf(EXPECTED_FACTORY), 0);
             assertEq(DeepstateV1Controller(EXPECTED_V1_CONTROLLER).rolesOf(EXPECTED_FACTORY), 0);
         }

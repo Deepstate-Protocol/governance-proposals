@@ -2,7 +2,7 @@
 
 Foundry project for authoring, reviewing, simulating, and submitting proposals to the live Deepstate Governor. The
 repository contains the hardened Rewarder V2 release candidate and deterministic deployment tooling, but no
-submission-ready governance proposal yet. The three dictated descriptions remain drafts until the system contracts
+submission-ready governance proposal yet. The two dictated descriptions remain drafts until the system contracts
 are deployed and their addresses, runtime hashes, receipts, and proposal fork block are pinned.
 
 The project follows the Solidity and deployment conventions in
@@ -14,7 +14,7 @@ optimized via-IR builds, pinned Foundry dependencies, type-safe calldata, propos
 
 The 25-commit implementation delta from `deepstate-protocol@codex/rewarder-v2` was relocated here at
 [pinned source revision `39a336f`](https://github.com/Deepstate-Protocol/deepstate-protocol/tree/39a336f0015d9a5c3f1029cde1191c1789e85587).
-Its production contracts, three interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
+Its production contracts, supporting interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
 first-party files in `src/` and `test/`. In addition to the local implementation test, `make check-live` exercises the
 actual Robinhood Lockup and Deepstate Inc Safe on a fork. Unchanged protocol and matching-engine contracts remain
 pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinned `deepstate-protocol` library; that
@@ -25,6 +25,12 @@ This candidate is not a concrete DGP and has not been deployed. It includes a re
 release manifest template, pinned live dependencies, and a live Sablier compatibility test; it does not yet include a
 submission-ready Governor action array or proposal ID. See [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the
 authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the production release procedure.
+
+The current release policy caps live DEEP supply and permanent Controller issuance at 3 billion DEEP. DGP-001 will
+atomically create a one-year endowment equal to 30% of the legacy Rewarder's execution-time accrued emissions, activate
+the exact 730-day mint policy, and replace the idle NVDA/USDG V1 hook with a fully funded Rewarder V2 capped at
+100 million DEEP over exactly 365 days. Factory markets use two 50-million side caps, a three-day cooldown, and a
+1-billion-DEEP lifetime primary-funding budget for ten total markets; there is no later market top-up path.
 
 ## Live target
 

@@ -18,11 +18,16 @@
   },
   "releasePolicy": {
     "note": "Governance-selected conservative release policy; these values are not discovered protocol facts.",
-    "minterLiveSupplyCap": "20000000000000000000000000000",
-    "minterGrossIssuanceCap": "20000000000000000000000000000",
-    "factoryInitialPrimaryFundingBudget": "1500000000000000000000000000",
-    "factoryInitialPrimaryFundingPerMarket": "150000000000000000000000000",
-    "maximumInitiallyFundedMarkets": 10
+    "minterLiveSupplyCap": "3000000000000000000000000000",
+    "minterGrossIssuanceCap": "3000000000000000000000000000",
+    "factoryLifetimeFundingBudget": "1000000000000000000000000000",
+    "factoryMarketFunding": "100000000000000000000000000",
+    "factorySideEmissionCap": "50000000000000000000000000",
+    "factoryEmissionDurationSeconds": "31536000",
+    "maximumFullyFundedMarkets": 10,
+    "governanceTopUpSupported": false,
+    "maximumLegacyEndowment": "300000000000000000000000000",
+    "minimumActivationIssuanceHeadroom": "442857142857142857142857142"
   },
   "liveDependencies": {
     "governor": {
@@ -38,6 +43,23 @@
     "router": {
       "address": "0x6cf19308C22FC82ea620Fa0B3E94948d20f27B96",
       "runtimeCodeHash": "0x287d53a803f8e488b46c74c73308554c77768e4f271f208632ab6283fa73caa3"
+    },
+    "legacyRewarder": {
+      "address": "0xE85ADBC03a6b52a2c9894c1BB525eC883ea156D7",
+      "runtimeCodeHash": "0xc78061023adf4f48ecbaab8e8a75080eaa8611b38ed2bf842cb07621245577cd",
+      "owner": "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
+      "router": "0x6cf19308C22FC82ea620Fa0B3E94948d20f27B96",
+      "rewardToken": "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
+      "poolId": "0x42819cadfbb25aab80543236e280fba4e61aa61e0b5b777541de54ae69da35e4",
+      "token0": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "token1": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "sideEmissionCap": "500000000000000000000000000",
+      "emissionDurationSeconds": "34128000",
+      "token0StartQuantity": "1000000",
+      "token0MaxQuantity": "1000000000000",
+      "token1StartQuantity": "1000000000000000000",
+      "token1MaxQuantity": "5000000000000000000000",
+      "totalAccruedCallRequired": true
     },
     "usdg": {
       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
@@ -74,16 +96,17 @@
   "contracts": {
     "minterController": {
       "salt": "0x304c43c720fd4782c53fdae386391a6648ceb66d5392726bdc48bc3afbb7e029",
-      "initCodeHash": "0x4df9de0c05ed644527afe7c80d33708f7009de31c18e7d0336d02c0c7c477c63",
-      "expectedRuntimeCodeHash": "0x1ee95cbabbe86c1b22538cd152807c3b9a6f91653e5e901255d2ef9362ab826b",
-      "predictedAddress": "0xafEB36106788d1b891f47e433beBa479800a8E5C",
+      "initCodeHash": "0x3e845810a412e1180499612841cd0aae0f5e6c6b558910f6eb5252a60d76a859",
+      "expectedRuntimeCodeHash": "0xea81d65604213d4ebecc4c3b97a6ff5a8b594e4ba619e5b6f4770a6a82d6144d",
+      "predictedAddress": "0x48D047816c4b2B083998Aa8ff7da01BD0f429944",
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
         "0x548129a58bC230549DF7F9e33f27E77F6779ff0f",
+        "0xE85ADBC03a6b52a2c9894c1BB525eC883ea156D7",
         "0x83fB2739abd9963c5341E4A176D93a7E5Ee73445",
-        "20000000000000000000000000000",
-        "20000000000000000000000000000"
+        "3000000000000000000000000000",
+        "3000000000000000000000000000"
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
@@ -106,15 +129,15 @@
     },
     "rewarderFactory": {
       "salt": "0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a",
-      "initCodeHash": "0xa1c63d094d5186d3933089bb40b053f2dc7815a5aa5910f1fcd7f7426550f51a",
-      "expectedRuntimeCodeHash": "0xbfc29be7fcebeb221bf328f1d663d5e8a751dff91afd64cfc0a9872888872d9f",
-      "predictedAddress": "0x7831d1C8408CB8E67e5B48c2df8a0b56C2A7aD47",
+      "initCodeHash": "0x20015b9f826d1dedc33763faf70ab9dca3c8c2530afece06ee810e9cc6ef35f0",
+      "expectedRuntimeCodeHash": "0x562503d22d5b07c8a344b7e36c3257f635dece9879e3bbdcac0b643fbd2cc58e",
+      "predictedAddress": "0xf02b7ba0317dD1a88f1793EC75382AC4F3bA9266",
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476",
-        "0xafEB36106788d1b891f47e433beBa479800a8E5C",
+        "0x48D047816c4b2B083998Aa8ff7da01BD0f429944",
         "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
-        "1500000000000000000000000000"
+        "1000000000000000000000000000"
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,

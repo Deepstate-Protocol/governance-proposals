@@ -8,6 +8,43 @@ import {DeepstateAddresses} from "../../script/config/DeepstateAddresses.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
+contract LiveSablierLegacyRouterMock {
+    mapping(bytes32 poolId => address hook) public poolHook;
+
+    function setPoolHook(bytes32 poolId, address hook) external {
+        poolHook[poolId] = hook;
+    }
+
+    function activeBookId(address token0, address token1) external pure returns (bytes32) {
+        return keccak256(abi.encode(token0, token1, uint256(0)));
+    }
+
+    function topOrder(bytes32, bool) external pure returns (uint32 nonce, uint160 soldAmount) {
+        return (0, 0);
+    }
+}
+
+contract LiveSablierLegacyRewarderMock {
+    address public immutable rewardToken;
+    address public immutable deepstate;
+    address public constant token0 = address(0x1000);
+    address public constant token1 = address(0x2000);
+    bytes32 public constant poolId = keccak256(abi.encode(token0, token1));
+
+    constructor(address rewardToken_, address deepstate_) {
+        rewardToken = rewardToken_;
+        deepstate = deepstate_;
+    }
+
+    function rewardees(address) external pure returns (uint32 orderNonce, uint64 startedAt) {
+        return (0, 0);
+    }
+
+    function totalAccrued(address token) external pure returns (uint96) {
+        return token == token0 || token == token1 ? 2 : 0;
+    }
+}
+
 /// @notice Compatibility test against the actual Sablier Lockup deployed on Robinhood Chain.
 /// @dev Set ROBINHOOD_RPC_URL to run. The ordinary offline suite deliberately skips this network-dependent test.
 contract DeepstateMinterControllerLiveSablierTest is Test {
@@ -26,10 +63,15 @@ contract DeepstateMinterControllerLiveSablierTest is Test {
         assertNotEq(SablierLockup(DeepstateAddresses.SABLIER_LOCKUP).nativeToken(), DeepstateAddresses.DEEP);
 
         DeepstateToken deep = new DeepstateToken(address(this), "Compatibility DEEP", "cDEEP");
+        LiveSablierLegacyRouterMock legacyRouter = new LiveSablierLegacyRouterMock();
+        LiveSablierLegacyRewarderMock legacyRewarder =
+            new LiveSablierLegacyRewarderMock(address(deep), address(legacyRouter));
+        legacyRouter.setPoolHook(legacyRewarder.poolId(), address(legacyRewarder));
         DeepstateMinterController controller = new DeepstateMinterController(
             address(this),
             address(deep),
             DeepstateAddresses.SABLIER_LOCKUP,
+            address(legacyRewarder),
             DeepstateAddresses.DEEPSTATE_INC_SAFE,
             1_000_000e18,
             1_000_000e18
@@ -56,7 +98,7 @@ contract DeepstateMinterControllerLiveSablierTest is Test {
         assertFalse(lockup.isCancelable(streamId));
         assertFalse(lockup.isTransferable(streamId));
         assertEq(deep.balanceOf(mintRecipient), 70e18);
-        assertEq(deep.balanceOf(DeepstateAddresses.SABLIER_LOCKUP), 30e18);
+        assertEq(deep.balanceOf(DeepstateAddresses.SABLIER_LOCKUP), 30e18 + 1);
 
         vm.warp(startTime + 365 days / 2);
         assertEq(lockup.streamedAmountOf(streamId), 15e18);

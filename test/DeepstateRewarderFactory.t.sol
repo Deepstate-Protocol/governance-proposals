@@ -62,8 +62,46 @@ contract InvalidRewardTokenMinterController is IDeepstateMinterController {
     }
 }
 
+contract FactoryLegacyRewarderCursorMock {
+    address public deepstate;
+    address public rewardToken;
+    bytes32 public poolId;
+    address public token0;
+    address public token1;
+    mapping(address token => uint32 nonce) internal _nonce;
+    mapping(address token => uint64 startedAt) internal _startedAt;
+    mapping(address token => uint96 accrued) internal _totalAccrued;
+
+    function configure(address deepstate_, address rewardToken_, bytes32 poolId_, address token0_, address token1_)
+        external
+    {
+        deepstate = deepstate_;
+        rewardToken = rewardToken_;
+        poolId = poolId_;
+        token0 = token0_;
+        token1 = token1_;
+    }
+
+    function setRewardee(address token, uint32 nonce, uint64 startedAt) external {
+        _nonce[token] = nonce;
+        _startedAt[token] = startedAt;
+    }
+
+    function setTotalAccrued(address token, uint96 accrued) external {
+        _totalAccrued[token] = accrued;
+    }
+
+    function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt) {
+        return (_nonce[token], _startedAt[token]);
+    }
+
+    function totalAccrued(address token) external view returns (uint96 accrued) {
+        return _totalAccrued[token];
+    }
+}
+
 contract DeepstateRewarderFactoryTest is Test {
-    uint256 internal constant INITIAL_BUDGET = 1_500_000_000e18;
+    uint256 internal constant FUNDING_BUDGET = 1_000_000_000e18;
     address internal constant LIVE_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address internal constant LIVE_NVDA = 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
 
@@ -81,6 +119,10 @@ contract DeepstateRewarderFactoryTest is Test {
     address internal operator = makeAddr("operator");
     address internal alice = makeAddr("alice");
     address internal vestingRecipient = makeAddr("vestingRecipient");
+    uint256 internal initialSupply;
+    uint256 internal initialGrossIssued;
+    uint256 internal initialSablierBalance;
+    uint256 internal initialNextStreamId;
 
     function setUp() public {
         vm.warp(1_000_000);
@@ -94,8 +136,12 @@ contract DeepstateRewarderFactoryTest is Test {
         deepstate = new DeepstateV1();
         deepstateV1Controller = new DeepstateV1Controller(address(this), address(deepstate));
         minterController = _newMinterController(address(this), deep);
+        initialSupply = deep.totalSupply();
+        initialGrossIssued = minterController.grossIssued();
+        initialSablierBalance = deep.balanceOf(address(sablier));
+        initialNextStreamId = sablier.nextStreamId();
         factory = new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(minterController), address(usdG), INITIAL_BUDGET
+            address(this), address(deepstateV1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
 
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
@@ -112,13 +158,12 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(address(factory.minterController()), address(minterController));
         assertEq(address(factory.rewardToken()), address(deep));
         assertEq(factory.usdG(), address(usdG));
-        assertEq(factory.initialFundingBudget(), INITIAL_BUDGET);
-        assertEq(factory.initialFundingCommitted(), 0);
+        assertEq(factory.fundingBudget(), FUNDING_BUDGET);
+        assertEq(factory.fundingCommitted(), 0);
         assertEq(factory.DEPLOYMENT_COOLDOWN(), 3 days);
-        assertEq(factory.EMISSION_DURATION(), 395 days);
-        assertEq(factory.SIDE_EMISSION_CAP(), 500_000_000e18);
-        assertEq(factory.INITIAL_FUNDING(), 150_000_000e18);
-        assertEq(factory.TOP_UP_FUNDING(), 850_000_000e18);
+        assertEq(factory.EMISSION_DURATION(), 365 days);
+        assertEq(factory.SIDE_EMISSION_CAP(), 50_000_000e18);
+        assertEq(factory.MARKET_FUNDING(), 100_000_000e18);
         assertEq(factory.USDG_START_QUANTITY(), 1e6);
         assertEq(factory.USDG_MAX_QUANTITY(), 1_000_000e6);
         assertEq(factory.MAX_QUANTITY_GROWTH(), 1_000_000);
@@ -132,16 +177,16 @@ contract DeepstateRewarderFactoryTest is Test {
     function test_ConstructorValidation() public {
         vm.expectRevert(DeepstateRewarderFactory.InvalidOwner.selector);
         new DeepstateRewarderFactory(
-            address(0), address(deepstateV1Controller), address(minterController), address(usdG), INITIAL_BUDGET
+            address(0), address(deepstateV1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
 
         vm.expectRevert(DeepstateRewarderFactory.InvalidDeepstateV1Controller.selector);
         new DeepstateRewarderFactory(
-            address(this), address(0), address(minterController), address(usdG), INITIAL_BUDGET
+            address(this), address(0), address(minterController), address(usdG), FUNDING_BUDGET
         );
 
         vm.expectRevert(DeepstateRewarderFactory.InvalidDeepstateV1Controller.selector);
-        new DeepstateRewarderFactory(address(this), alice, address(minterController), address(usdG), INITIAL_BUDGET);
+        new DeepstateRewarderFactory(address(this), alice, address(minterController), address(usdG), FUNDING_BUDGET);
 
         DeepstateV1Controller independentlyOwnedController = new DeepstateV1Controller(alice, address(deepstate));
         vm.expectRevert(
@@ -154,16 +199,22 @@ contract DeepstateRewarderFactoryTest is Test {
             address(independentlyOwnedController),
             address(minterController),
             address(usdG),
-            INITIAL_BUDGET
+            FUNDING_BUDGET
         );
 
         vm.expectRevert(DeepstateRewarderFactory.InvalidMinterController.selector);
         new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(0), address(usdG), INITIAL_BUDGET
+            address(this), address(deepstateV1Controller), address(0), address(usdG), FUNDING_BUDGET
         );
 
         DeepstateMinterController mismatchedMinter = new DeepstateMinterController(
-            alice, address(deep), address(sablier), vestingRecipient, 20_000_000_000e18, 20_000_000_000e18
+            alice,
+            address(deep),
+            address(sablier),
+            address(minterController.legacyRewarder()),
+            vestingRecipient,
+            20_000_000_000e18,
+            20_000_000_000e18
         );
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -171,13 +222,13 @@ contract DeepstateRewarderFactoryTest is Test {
             )
         );
         new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(mismatchedMinter), address(usdG), INITIAL_BUDGET
+            address(this), address(deepstateV1Controller), address(mismatchedMinter), address(usdG), FUNDING_BUDGET
         );
 
         InvalidRewardTokenMinterController zeroTokenController = new InvalidRewardTokenMinterController(address(0));
         vm.expectRevert(DeepstateRewarderFactory.InvalidRewardToken.selector);
         new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(zeroTokenController), address(usdG), INITIAL_BUDGET
+            address(this), address(deepstateV1Controller), address(zeroTokenController), address(usdG), FUNDING_BUDGET
         );
 
         FactoryTestToken wrongDecimals = new FactoryTestToken("Wrong", "WRONG", 18);
@@ -187,22 +238,22 @@ contract DeepstateRewarderFactoryTest is Test {
             address(deepstateV1Controller),
             address(minterController),
             address(wrongDecimals),
-            INITIAL_BUDGET
+            FUNDING_BUDGET
         );
 
         vm.expectRevert(DeepstateRewarderFactory.InvalidUSDG.selector);
         new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(minterController), alice, INITIAL_BUDGET
+            address(this), address(deepstateV1Controller), address(minterController), alice, FUNDING_BUDGET
         );
 
-        vm.expectRevert(DeepstateRewarderFactory.InvalidInitialFundingBudget.selector);
+        vm.expectRevert(DeepstateRewarderFactory.InvalidFundingBudget.selector);
         new DeepstateRewarderFactory(
             address(this), address(deepstateV1Controller), address(minterController), address(usdG), 0
         );
 
-        vm.expectRevert(DeepstateRewarderFactory.InvalidInitialFundingBudget.selector);
+        vm.expectRevert(DeepstateRewarderFactory.InvalidFundingBudget.selector);
         new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(minterController), address(usdG), 150_000_000e18 + 1
+            address(this), address(deepstateV1Controller), address(minterController), address(usdG), 100_000_000e18 + 1
         );
     }
 
@@ -240,9 +291,10 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(factory.activeRewarder(poolId), address(rewarder));
         assertEq(factory.rewarderPool(address(rewarder)), poolId);
         assertTrue(factory.marketDeployed(poolId));
-        assertEq(factory.initialFundingCommitted(), 150_000_000e18);
-        assertEq(deep.balanceOf(address(rewarder)), 150_000_000e18);
-        assertEq(deep.balanceOf(address(sablier)), _vestingAllocation(150_000_000e18));
+        assertEq(factory.fundingCommitted(), 100_000_000e18);
+        assertEq(deep.balanceOf(address(rewarder)), 100_000_000e18);
+        assertEq(deep.balanceOf(address(rewarder)), uint256(rewarder.sideEmissionCap()) * 2);
+        assertEq(deep.balanceOf(address(sablier)), initialSablierBalance + _vestingAllocation(100_000_000e18));
     }
 
     function test_LiveUSDGAddressSortsBeforeLiveNVDAAndKeepsSemanticConfiguration() public {
@@ -252,7 +304,7 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.etch(LIVE_NVDA, address(eighteenDecimals).code);
 
         DeepstateRewarderFactory liveOrderFactory = new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(minterController), LIVE_USDG, 150_000_000e18
+            address(this), address(deepstateV1Controller), address(minterController), LIVE_USDG, 100_000_000e18
         );
         minterController.grantRoles(address(liveOrderFactory), minterController.MINTER_ROLE());
         deepstateV1Controller.grantRoles(address(liveOrderFactory), deepstateV1Controller.HOOK_MANAGER_ROLE());
@@ -284,7 +336,7 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.prank(operator);
         factory.deployMarket(_market(address(stockB)));
 
-        assertEq(factory.initialFundingCommitted(), 300_000_000e18);
+        assertEq(factory.fundingCommitted(), 200_000_000e18);
     }
 
     function test_OnlyGovernanceSetsOperatorAndCanRevokeImmediately() public {
@@ -360,8 +412,8 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(factory.operator(), address(0));
     }
 
-    function test_InitialFundingBudgetIsMonotonicAndNeverRestoredByRetirement() public {
-        DeepstateRewarderFactory limitedFactory = _newAuthorizedFactory(150_000_000e18);
+    function test_FundingBudgetIsMonotonicAndNeverRestoredByRetirement() public {
+        DeepstateRewarderFactory limitedFactory = _newAuthorizedFactory(100_000_000e18);
         limitedFactory.setOperator(operator);
 
         vm.prank(operator);
@@ -372,13 +424,13 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.warp(limitedFactory.nextDeploymentAt());
         vm.expectRevert(
             abi.encodeWithSelector(
-                DeepstateRewarderFactory.InitialFundingBudgetExceeded.selector, 150_000_000e18, 300_000_000e18
+                DeepstateRewarderFactory.FundingBudgetExceeded.selector, 100_000_000e18, 200_000_000e18
             )
         );
         vm.prank(operator);
         limitedFactory.deployMarket(_market(address(stockB)));
 
-        assertEq(limitedFactory.initialFundingCommitted(), 150_000_000e18);
+        assertEq(limitedFactory.fundingCommitted(), 100_000_000e18);
     }
 
     function test_RemovedPoolCanNeverBeRedeployed() public {
@@ -397,70 +449,215 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(factory.activeRewarder(poolId), address(0));
     }
 
-    function test_GovernanceTopUpCompletesExactlyOneBillionPrimaryFunding() public {
-        vm.prank(operator);
-        DeepstateRewarderV2 rewarder = factory.deployMarket(_market(address(stockA)));
-        bytes32 poolId = rewarder.poolId();
+    function test_GovernanceMigratesExactIdlePredecessorAndFullyFundsV2Atomically() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
 
-        vm.expectEmit(true, true, false, true, address(factory));
-        emit DeepstateRewarderFactory.MarketToppedUp(poolId, address(rewarder), 850_000_000e18, 2);
-        factory.topUpMarket(address(stockA), address(rewarder));
+        DeepstateRewarderV2 rewarder = factory.migrateMarket(_market(address(stockA)), address(predecessor));
 
-        assertTrue(factory.marketToppedUp(poolId));
-        assertEq(deep.balanceOf(address(rewarder)), 1_000_000_000e18);
-        assertEq(
-            deep.balanceOf(address(sablier)), _vestingAllocation(150_000_000e18) + _vestingAllocation(850_000_000e18)
-        );
-
-        vm.expectRevert(abi.encodeWithSelector(DeepstateRewarderFactory.MarketAlreadyToppedUp.selector, poolId));
-        factory.topUpMarket(address(stockA), address(rewarder));
+        assertEq(deepstate.poolHook(poolId), address(rewarder));
+        assertEq(factory.activeRewarder(poolId), address(rewarder));
+        assertEq(factory.rewarderPool(address(rewarder)), poolId);
+        assertTrue(factory.marketDeployed(poolId));
+        assertEq(factory.fundingCommitted(), 100_000_000e18);
+        assertEq(factory.nextDeploymentAt(), block.timestamp + 3 days);
+        assertEq(rewarder.sideEmissionCap(), 50_000_000e18);
+        assertEq(rewarder.emissionDuration(), 365 days);
+        assertEq(deep.balanceOf(address(rewarder)), 100_000_000e18);
+        assertEq(deep.balanceOf(address(rewarder)), uint256(rewarder.sideEmissionCap()) * 2);
+        assertEq(deep.balanceOf(address(sablier)), initialSablierBalance + _vestingAllocation(100_000_000e18));
     }
 
-    function test_OperatorCannotTopUpMarket() public {
-        vm.prank(operator);
-        DeepstateRewarderV2 rewarder = factory.deployMarket(_market(address(stockA)));
+    function test_OperatorCannotMigrateExistingHook() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
 
         vm.expectRevert(Ownable.Unauthorized.selector);
         vm.prank(operator);
-        factory.topUpMarket(address(stockA), address(rewarder));
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.fundingCommitted(), 0);
     }
 
-    function test_TopUpExpectedRewarderAndCurrentHookChecksFailSafely() public {
-        vm.prank(operator);
-        DeepstateRewarderV2 rewarder = factory.deployMarket(_market(address(stockA)));
-        bytes32 poolId = rewarder.poolId();
+    function test_MigrationRequiresExactNonzeroPredecessor() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
+
+        vm.expectRevert(DeepstateRewarderFactory.InvalidExpectedExistingHook.selector);
+        factory.migrateMarket(_market(address(stockA)), address(0));
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                DeepstateRewarderFactory.UnexpectedRewarder.selector, poolId, alice, address(rewarder)
+                DeepstateRewarderFactory.UnexpectedPoolHook.selector, poolId, alice, address(predecessor)
             )
         );
-        factory.topUpMarket(address(stockA), alice);
+        factory.migrateMarket(_market(address(stockA)), alice);
 
-        deepstateV1Controller.setPoolHookConfig(rewarder.token0(), rewarder.token1(), address(0), false, false);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                DeepstateRewarderFactory.UnexpectedPoolHook.selector, poolId, address(rewarder), address(0)
-            )
-        );
-        factory.topUpMarket(address(stockA), address(rewarder));
-
-        assertFalse(factory.marketToppedUp(poolId));
-        assertEq(deep.balanceOf(address(rewarder)), 150_000_000e18);
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.fundingCommitted(), 0);
     }
 
-    function test_TopUpCannotFundRetiredRewarderEvenIfFactoryBookIsStale() public {
-        vm.prank(operator);
-        DeepstateRewarderV2 rewarder = factory.deployMarket(_market(address(stockA)));
-        vm.prank(address(factory));
-        rewarder.retireAndBurnBalance();
+    function test_MigrationRequiresPredecessorIdentityToMatchPoolRouterAndRewardToken() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
 
+        bytes32 wrongPoolId = bytes32(uint256(poolId) + 1);
+        predecessor.configure(address(deepstate), address(deep), wrongPoolId, token0, token1);
         vm.expectRevert(
-            abi.encodeWithSelector(DeepstateRewarderFactory.RewarderAlreadyRetired.selector, address(rewarder))
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderPoolIdentityMismatch.selector,
+                poolId,
+                wrongPoolId,
+                token0,
+                token0,
+                token1,
+                token1
+            )
         );
-        factory.topUpMarket(address(stockA), address(rewarder));
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
 
-        assertFalse(factory.marketToppedUp(rewarder.poolId()));
+        predecessor.configure(address(deepstate), address(deep), poolId, token1, token0);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderPoolIdentityMismatch.selector,
+                poolId,
+                poolId,
+                token0,
+                token1,
+                token1,
+                token0
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        predecessor.configure(alice, address(deep), poolId, token0, token1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderDependencyMismatch.selector,
+                address(deepstate),
+                alice,
+                address(deep),
+                address(deep)
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        predecessor.configure(address(deepstate), alice, poolId, token0, token1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderDependencyMismatch.selector,
+                address(deepstate),
+                address(deepstate),
+                address(deep),
+                alice
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
+    }
+
+    function test_MigrationRejectsAnyLiveBidOrAskBeforeClearingThePredecessor() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        bytes32 bookId = deepstate.activeBookId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
+
+        vm.mockCall(
+            address(deepstate),
+            abi.encodeWithSelector(DeepstateV1.topOrder.selector, bookId, true),
+            abi.encode(uint32(7), uint160(11e18))
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.PoolBookNotIdle.selector, bookId, true, uint32(7), uint160(11e18)
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+        vm.clearMockedCalls();
+
+        vm.mockCall(
+            address(deepstate),
+            abi.encodeWithSelector(DeepstateV1.topOrder.selector, bookId, false),
+            abi.encode(uint32(8), uint160(13e18))
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.PoolBookNotIdle.selector, bookId, false, uint32(8), uint160(13e18)
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+        vm.clearMockedCalls();
+
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
+    }
+
+    function test_MigrationRejectsEitherNonzeroLegacyRewardCursor() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
+
+        predecessor.setRewardee(token0, 17, 1_234);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderCursorNotIdle.selector, token0, uint32(17), uint64(1_234)
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        predecessor.setRewardee(token0, 0, 0);
+        predecessor.setRewardee(token1, 0, 9_876);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateRewarderFactory.LegacyRewarderCursorNotIdle.selector, token1, uint32(0), uint64(9_876)
+            )
+        );
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
+    }
+
+    function test_MigrationRestoresPredecessorWhenFundingDependencyFails() public {
+        FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        bytes32 poolId = _poolId(token0, token1);
+        predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
+        deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
+        sablier.setRevertCreate(true);
+
+        vm.expectRevert(MockSablierLockupLinearV4.CreateReverted.selector);
+        factory.migrateMarket(_market(address(stockA)), address(predecessor));
+
+        assertEq(deepstate.poolHook(poolId), address(predecessor));
+        assertEq(factory.activeRewarder(poolId), address(0));
+        assertFalse(factory.marketDeployed(poolId));
+        assertEq(factory.nextDeploymentAt(), 0);
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
+        assertEq(minterController.grossIssued(), initialGrossIssued);
+        assertEq(sablier.nextStreamId(), initialNextStreamId);
     }
 
     function test_OperatorRemovesExpectedMarketAndBurnsAllFunding() public {
@@ -469,7 +666,7 @@ contract DeepstateRewarderFactoryTest is Test {
         bytes32 poolId = rewarder.poolId();
 
         vm.expectEmit(false, false, false, true, address(rewarder));
-        emit DeepstateRewarderV2.RewarderRetiredAndBalanceBurned(150_000_000e18);
+        emit DeepstateRewarderV2.RewarderRetiredAndBalanceBurned(100_000_000e18);
         vm.expectEmit(true, true, false, false, address(factory));
         emit DeepstateRewarderFactory.MarketRemoved(poolId, address(rewarder));
         vm.prank(operator);
@@ -482,7 +679,7 @@ contract DeepstateRewarderFactoryTest is Test {
         assertTrue(rewarder.retired());
         assertEq(rewarder.owner(), address(0));
         assertEq(deep.balanceOf(address(rewarder)), 0);
-        assertEq(deep.totalSupply(), _vestingAllocation(150_000_000e18));
+        assertEq(deep.totalSupply(), initialSupply + _vestingAllocation(100_000_000e18));
     }
 
     function test_RemovalExpectedRewarderAndReplacementHookChecksFailSafely() public {
@@ -559,8 +756,8 @@ contract DeepstateRewarderFactoryTest is Test {
         factory.deployMarket(config);
 
         assertEq(factory.nextDeploymentAt(), 0);
-        assertEq(factory.initialFundingCommitted(), 0);
-        assertEq(deep.totalSupply(), 0);
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
     }
 
     function test_StockQuantityRampVariesPerPoolAndAcceptsExactGrowthBoundary() public {
@@ -595,15 +792,15 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.prank(operator);
         factory.deployMarket(config);
 
-        assertEq(factory.initialFundingCommitted(), 0);
-        assertEq(deep.totalSupply(), 0);
+        assertEq(factory.fundingCommitted(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
     }
 
     function test_DeploymentWithoutMinterRoleRevertsAllFactoryCommitmentsAtomically() public {
         DeepstateV1 secondDeepstate = new DeepstateV1();
         DeepstateV1Controller secondV1Controller = new DeepstateV1Controller(address(this), address(secondDeepstate));
         DeepstateRewarderFactory secondFactory = new DeepstateRewarderFactory(
-            address(this), address(secondV1Controller), address(minterController), address(usdG), INITIAL_BUDGET
+            address(this), address(secondV1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
         secondDeepstate.transferOwnership(address(secondV1Controller));
         secondV1Controller.grantRoles(address(secondFactory), secondV1Controller.HOOK_MANAGER_ROLE());
@@ -615,7 +812,7 @@ contract DeepstateRewarderFactoryTest is Test {
 
         bytes32 poolId = _stockPoolId(address(stockA));
         assertEq(secondFactory.nextDeploymentAt(), 0);
-        assertEq(secondFactory.initialFundingCommitted(), 0);
+        assertEq(secondFactory.fundingCommitted(), 0);
         assertFalse(secondFactory.marketDeployed(poolId));
         assertEq(secondFactory.activeRewarder(poolId), address(0));
     }
@@ -629,18 +826,18 @@ contract DeepstateRewarderFactoryTest is Test {
         factory.deployMarket(_market(address(stockA)));
 
         assertEq(factory.nextDeploymentAt(), 0);
-        assertEq(factory.initialFundingCommitted(), 0);
+        assertEq(factory.fundingCommitted(), 0);
         assertFalse(factory.marketDeployed(poolId));
         assertEq(factory.activeRewarder(poolId), address(0));
         assertEq(deepstate.poolHook(poolId), address(0));
-        assertEq(deep.totalSupply(), 0);
+        assertEq(deep.totalSupply(), initialSupply);
     }
 
     function test_RouterConfigurationFailureRollsBackMintStreamAndFactoryCommitmentsAtomically() public {
         DeepstateV1 secondDeepstate = new DeepstateV1();
         DeepstateV1Controller secondV1Controller = new DeepstateV1Controller(address(this), address(secondDeepstate));
         DeepstateRewarderFactory secondFactory = new DeepstateRewarderFactory(
-            address(this), address(secondV1Controller), address(minterController), address(usdG), INITIAL_BUDGET
+            address(this), address(secondV1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
         secondDeepstate.transferOwnership(address(secondV1Controller));
         minterController.grantRoles(address(secondFactory), minterController.MINTER_ROLE());
@@ -652,13 +849,13 @@ contract DeepstateRewarderFactoryTest is Test {
         secondFactory.deployMarket(_market(address(stockA)));
 
         assertEq(secondFactory.nextDeploymentAt(), 0);
-        assertEq(secondFactory.initialFundingCommitted(), 0);
+        assertEq(secondFactory.fundingCommitted(), 0);
         assertFalse(secondFactory.marketDeployed(poolId));
         assertEq(secondFactory.activeRewarder(poolId), address(0));
         assertEq(secondDeepstate.poolHook(poolId), address(0));
-        assertEq(deep.totalSupply(), 0);
-        assertEq(minterController.grossIssued(), 0);
-        assertEq(sablier.nextStreamId(), 1);
+        assertEq(deep.totalSupply(), initialSupply);
+        assertEq(minterController.grossIssued(), initialGrossIssued);
+        assertEq(sablier.nextStreamId(), initialNextStreamId);
     }
 
     function test_CannotDeployOverExistingRouterHook() public {
@@ -670,7 +867,7 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.prank(operator);
         factory.deployMarket(_market(address(stockA)));
 
-        assertEq(factory.initialFundingCommitted(), 0);
+        assertEq(factory.fundingCommitted(), 0);
     }
 
     function test_UnauthorizedAccountCannotDeployOrRemoveMarket() public {
@@ -737,13 +934,26 @@ contract DeepstateRewarderFactoryTest is Test {
         internal
         returns (DeepstateMinterController controller_)
     {
+        FactoryLegacyRewarderCursorMock legacyRewarder = new FactoryLegacyRewarderCursorMock();
+        (address token0, address token1) = _sort(address(stockA), address(usdG));
+        legacyRewarder.configure(address(deepstate), address(token), _poolId(token0, token1), token0, token1);
+        // Four base units of recorded legacy accrual produce the smallest nonzero 30% endowment.
+        legacyRewarder.setTotalAccrued(token0, 4);
+        deepstate.setPoolHookConfig(token0, token1, address(legacyRewarder), true, true);
         controller_ = new DeepstateMinterController(
-            admin, address(token), address(sablier), vestingRecipient, 20_000_000_000e18, 20_000_000_000e18
+            admin,
+            address(token),
+            address(sablier),
+            address(legacyRewarder),
+            vestingRecipient,
+            20_000_000_000e18,
+            20_000_000_000e18
         );
         token.grantRole(token.MINTER_ROLE(), address(controller_));
         token.grantRole(token.DEFAULT_ADMIN_ROLE(), address(controller_));
         token.renounceRole(token.DEFAULT_ADMIN_ROLE(), address(this));
         vm.prank(admin);
         controller_.lockTokenAdministration();
+        deepstate.setPoolHookConfig(token0, token1, address(0), false, false);
     }
 }

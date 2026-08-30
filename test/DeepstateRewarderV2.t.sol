@@ -38,7 +38,7 @@ contract ReentrantBurnToken {
 }
 
 contract DeepstateRewarderV2Test is Test {
-    uint96 internal constant SIDE_CAP = 500_000_000e18;
+    uint96 internal constant SIDE_CAP = 50_000_000e18;
     address internal constant DEEPSTATE = address(0x1000);
     address internal constant TOKEN0 = address(0x2000);
     address internal constant TOKEN1 = address(0x3000);
@@ -58,7 +58,7 @@ contract DeepstateRewarderV2Test is Test {
             TOKEN0,
             TOKEN1,
             SIDE_CAP,
-            395 days,
+            365 days,
             1e18,
             5_000e18,
             1e6,
@@ -74,6 +74,8 @@ contract DeepstateRewarderV2Test is Test {
         assertEq(rewarder.token0(), TOKEN0);
         assertEq(rewarder.token1(), TOKEN1);
         assertEq(rewarder.sideEmissionCap(), SIDE_CAP);
+        assertEq(rewarder.emissionDuration(), 365 days);
+        assertEq(rewardToken.balanceOf(address(rewarder)), 100_000_000e18);
     }
 
     function test_OwnerCanPermanentlyRetireAndBurnEntireLiveRewardBalance() public {
@@ -188,7 +190,7 @@ contract DeepstateRewarderV2Test is Test {
             TOKEN0,
             TOKEN1,
             SIDE_CAP,
-            395 days,
+            365 days,
             1e18,
             5_000e18,
             1e6,
