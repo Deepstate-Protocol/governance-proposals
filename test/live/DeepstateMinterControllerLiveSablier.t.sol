@@ -23,6 +23,7 @@ contract DeepstateMinterControllerLiveSablierTest is Test {
         vm.createSelectFork(rpcUrl);
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
         assertEq(DeepstateAddresses.SABLIER_LOCKUP.codehash, DeepstateAddresses.SABLIER_LOCKUP_CODEHASH);
+        assertNotEq(SablierLockup(DeepstateAddresses.SABLIER_LOCKUP).nativeToken(), DeepstateAddresses.DEEP);
 
         DeepstateToken deep = new DeepstateToken(address(this), "Compatibility DEEP", "cDEEP");
         DeepstateMinterController controller = new DeepstateMinterController(

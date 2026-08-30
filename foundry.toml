@@ -19,5 +19,10 @@ fs_permissions = [
 [fmt]
 line_length = 120
 
+[invariant]
+# Handler actions contain executable oracles. Any unexpected handler revert must fail the campaign instead of being
+# discarded, otherwise a reverted assertion could also roll back the state that the outer invariant needs to observe.
+fail_on_revert = true
+
 [rpc_endpoints]
 robinhood = "${ROBINHOOD_RPC_URL}"

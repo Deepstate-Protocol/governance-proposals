@@ -8,15 +8,19 @@ import {DeepstateAddresses} from "./config/DeepstateAddresses.sol";
 import {DeepstateMinterController} from "../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../src/DeepstateRewarderFactory.sol";
 import {DeepstateV1Controller} from "../src/DeepstateV1Controller.sol";
+import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
 interface ISablierLockupDeploymentIdentity {
     function comptroller() external view returns (address);
+    function nativeToken() external view returns (address);
 }
 
 /// @notice Deterministic, idempotent release entrypoint for the three Rewarder V2 system contracts.
 /// @dev `run()` is read-only and only prints the plan. Deployment requires deliberately selecting `deploy()`, setting
 /// DEEPSTATE_CONFIRM_CREATE2_DEPLOYMENT=true, and passing Foundry's separate `--broadcast` flag.
 contract DeployRewarderV2System is Script {
+    uint256 private constant MINIMUM_COMBINED_ISSUANCE = 4;
+
     struct DeploymentPlan {
         address minterController;
         address v1Controller;
@@ -33,11 +37,11 @@ contract DeployRewarderV2System is Script {
     bytes32 public constant V1_CONTROLLER_SALT = 0x082f06fa60ca7855e107a32607127f39acece481342eb9696ae09f1139dbe01a;
     bytes32 public constant FACTORY_SALT = 0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a;
     bytes32 public constant MINTER_RUNTIME_CODE_HASH =
-        0x2556aa80b5b98e5eb02bdf8a8ce288aa86c026b0ea67e1cef7d996714fa75499;
+        0x1ee95cbabbe86c1b22538cd152807c3b9a6f91653e5e901255d2ef9362ab826b;
     bytes32 public constant V1_CONTROLLER_RUNTIME_CODE_HASH =
-        0xcd85dd360a076e26501584709edcf7e6b69a73e3bb60fc0684976e172d447041;
+        0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc;
     bytes32 public constant FACTORY_RUNTIME_CODE_HASH =
-        0x6c9b913b9a88c52b4894e43f0015fd817f94afd6583924ddb062ad8a7cbf0d76;
+        0xbfc29be7fcebeb221bf328f1d663d5e8a751dff91afd64cfc0a9872888872d9f;
 
     error CodeHashMismatch(address target, bytes32 expected, bytes32 actual);
     error Create2DeploymentFailed(address expected);
@@ -99,7 +103,8 @@ contract DeployRewarderV2System is Script {
         );
     }
 
-    function _plan() private pure returns (DeploymentPlan memory plan) {
+    /// @dev Internal so the release plan can be exercised end-to-end by the offline deployment state machine.
+    function _plan() internal pure returns (DeploymentPlan memory plan) {
         plan.minterInitCode = abi.encodePacked(
             type(DeepstateMinterController).creationCode,
             abi.encode(
@@ -144,7 +149,9 @@ contract DeployRewarderV2System is Script {
         );
     }
 
-    function _deployIfMissing(bytes32 salt, bytes memory initCode, address expected) private {
+    /// @dev Internal so partial deployment and idempotent recovery can be invariant-tested without bypassing
+    /// the production entrypoint's live-dependency and confirmation gates.
+    function _deployIfMissing(bytes32 salt, bytes memory initCode, address expected) internal {
         if (expected.code.length != 0) return;
         (bool success, bytes memory result) = DeepstateAddresses.CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
         if (!success) {
@@ -177,9 +184,19 @@ contract DeployRewarderV2System is Script {
         if (comptroller != DeepstateAddresses.SABLIER_COMPTROLLER) {
             revert InvalidDeployedConfiguration(DeepstateAddresses.SABLIER_LOCKUP);
         }
+        if (
+            ISablierLockupDeploymentIdentity(DeepstateAddresses.SABLIER_LOCKUP).nativeToken() == DeepstateAddresses.DEEP
+        ) {
+            revert InvalidDeployedConfiguration(DeepstateAddresses.SABLIER_LOCKUP);
+        }
+        if (!_hasMinimumMintHeadroom(DeepstateAddresses.DEEP, DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP)) {
+            revert InvalidDeployedConfiguration(DeepstateAddresses.DEEP);
+        }
     }
 
-    function _validateExistingDeployments(DeploymentPlan memory plan) private view {
+    /// @dev Internal so tests can prove the checked runtime, immutable configuration, and mutable release scalars at
+    /// an occupied target. Complete Controller role absence additionally requires the event-history release gate.
+    function _validateExistingDeployments(DeploymentPlan memory plan) internal view {
         if (plan.minterController.code.length != 0) _verifyMinterController(plan.minterController);
         if (plan.v1Controller.code.length != 0) _verifyV1Controller(plan.v1Controller);
         if (plan.rewarderFactory.code.length != 0) {
@@ -196,6 +213,8 @@ contract DeployRewarderV2System is Script {
                 || controller.recipient() != DeepstateAddresses.DEEPSTATE_INC_SAFE
                 || controller.mintCap() != DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP
                 || controller.grossIssuanceCap() != DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
+                || controller.MINIMUM_COMBINED_ISSUANCE() != MINIMUM_COMBINED_ISSUANCE
+                || !_hasMinimumMintHeadroom(address(controller.deepstateToken()), controller.mintCap())
                 || controller.grossIssued() != 0 || controller.tokenAdministrationEndsAt() != 0
         ) {
             revert InvalidDeployedConfiguration(deployed);
@@ -234,6 +253,11 @@ contract DeployRewarderV2System is Script {
     function _requireCodeHash(address target, bytes32 expected) private view {
         bytes32 actual = target.codehash;
         if (actual != expected) revert CodeHashMismatch(target, expected, actual);
+    }
+
+    function _hasMinimumMintHeadroom(address token, uint256 cap) private view returns (bool) {
+        return
+            cap >= MINIMUM_COMBINED_ISSUANCE && DeepstateToken(token).totalSupply() <= cap - MINIMUM_COMBINED_ISSUANCE;
     }
 
     function _logPlan(DeploymentPlan memory plan) private view {

@@ -9,6 +9,7 @@ ZERO_ADDRESS=0x0000000000000000000000000000000000000000
 SAFE_MODULES_SENTINEL=0x0000000000000000000000000000000000000001
 ERC1967_IMPLEMENTATION_SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
 SABLIER_PROTOCOL_LOCKUP=2
+MINIMUM_COMBINED_ISSUANCE=4
 
 require_command() {
     local command_name="$1"
@@ -38,6 +39,36 @@ decimal_greater_than_or_equal() {
     [[ "$left" == "$right" || "$left" > "$right" ]]
 }
 
+decimal_subtract_digit() {
+    local value="${1#${1%%[!0]*}}"
+    local borrow="$2"
+    local result=""
+    local index
+    local digit
+    local difference
+    value="${value:-0}"
+    if (( borrow < 0 || borrow > 9 )); then
+        printf 'decimal_subtract_digit only supports a one-digit subtrahend\n' >&2
+        exit 1
+    fi
+    for ((index = ${#value} - 1; index >= 0; --index)); do
+        digit="${value:index:1}"
+        difference=$((10#$digit - borrow))
+        borrow=0
+        if (( difference < 0 )); then
+            difference=$((difference + 10))
+            borrow=1
+        fi
+        result="${difference}${result}"
+    done
+    if (( borrow != 0 )); then
+        printf 'Cannot subtract from decimal value %s\n' "$value" >&2
+        exit 1
+    fi
+    result="${result#${result%%[!0]*}}"
+    printf '%s\n' "${result:-0}"
+}
+
 solidity_address() {
     local name="$1"
     local value
@@ -52,12 +83,22 @@ solidity_address() {
 solidity_uint() {
     local name="$1"
     local value
-    value="$(sed -nE "s/.*constant ${name} = ([0-9_]+);/\1/p" "$ADDRESS_REGISTRY")"
+    local coefficient
+    local exponent
+    value="$(sed -nE "s/.*constant ${name} = ([0-9_]+(e[0-9_]+)?);/\1/p" "$ADDRESS_REGISTRY")"
     if [[ -z "$value" ]]; then
         printf 'Unable to read %s from %s\n' "$name" "$ADDRESS_REGISTRY" >&2
         exit 1
     fi
-    printf '%s\n' "${value//_/}"
+    value="${value//_/}"
+    if [[ "$value" == *e* ]]; then
+        coefficient="${value%%e*}"
+        exponent="${value##*e}"
+        printf '%s' "$coefficient"
+        printf '%0*d\n' "$exponent" 0
+        return
+    fi
+    printf '%s\n' "$value"
 }
 
 solidity_bytes32() {
@@ -110,6 +151,18 @@ require_address() {
     fi
 }
 
+require_distinct_address() {
+    local label="$1"
+    local actual
+    local forbidden
+    actual="$(normalize_address "$2")"
+    forbidden="$(normalize_address "$3")"
+    if [[ "$actual" == "$forbidden" ]]; then
+        printf '%s must not be %s\n' "$label" "$forbidden" >&2
+        exit 1
+    fi
+}
+
 require_command cast
 
 EXPECTED_CHAIN_ID="$(solidity_uint CHAIN_ID)"
@@ -136,6 +189,7 @@ EXPECTED_SAFE_THRESHOLD="$(solidity_uint DEEPSTATE_INC_SAFE_THRESHOLD)"
 EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD="$(solidity_uint SABLIER_LOCKUP_MIN_FEE_USD)"
 EXPECTED_SABLIER_MAX_FEE_USD="$(solidity_uint SABLIER_MAX_FEE_USD)"
 EXPECTED_SABLIER_COMPTROLLER_VERSION="$(solidity_string SABLIER_COMPTROLLER_VERSION)"
+EXPECTED_MINTER_LIVE_SUPPLY_CAP="$(solidity_uint MINTER_LIVE_SUPPLY_CAP)"
 GOVERNOR="$(solidity_address GOVERNOR)"
 DEEP="$(solidity_address DEEP)"
 STATE="$(solidity_address STATE)"
@@ -230,6 +284,20 @@ require_address \
     "Sablier Lockup Comptroller" \
     "$(rpc_call "$SABLIER_LOCKUP" 'comptroller()(address)')" \
     "$SABLIER_COMPTROLLER"
+require_distinct_address \
+    "Sablier Lockup native token" \
+    "$(rpc_call "$SABLIER_LOCKUP" 'nativeToken()(address)')" \
+    "$DEEP"
+
+deep_total_supply="$(rpc_uint "$DEEP" 'totalSupply()(uint256)')"
+maximum_supply_with_minimum_headroom="$(
+    decimal_subtract_digit "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" "$MINIMUM_COMBINED_ISSUANCE"
+)"
+if ! decimal_greater_than_or_equal "$maximum_supply_with_minimum_headroom" "$deep_total_supply"; then
+    printf 'DEEP supply leaves less than %s base units under the mint cap: supply %s, cap %s\n' \
+        "$MINIMUM_COMBINED_ISSUANCE" "$deep_total_supply" "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" >&2
+    exit 1
+fi
 
 comptroller_implementation_word="$(
     cast storage "$SABLIER_COMPTROLLER" "$ERC1967_IMPLEMENTATION_SLOT" \

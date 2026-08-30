@@ -43,6 +43,7 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(minterController.grossIssued(), 0);
         assertEq(minterController.RECIPIENT_ALLOCATION_BPS(), 30_00);
         assertEq(minterController.PRIMARY_ALLOCATION_BPS(), 70_00);
+        assertEq(minterController.MINIMUM_COMBINED_ISSUANCE(), 4);
         assertEq(minterController.VESTING_DURATION(), 365 days);
         assertEq(minterController.TOKEN_ADMINISTRATION_DURATION(), 2 * 365 days);
         assertEq(minterController.owner(), address(this));
@@ -72,11 +73,42 @@ contract DeepstateMinterControllerTest is Test {
         vm.expectRevert(DeepstateMinterController.InvalidRecipient.selector);
         new DeepstateMinterController(address(this), address(deep), address(sablier), address(0), MINT_CAP, MINT_CAP);
 
-        vm.expectRevert(DeepstateMinterController.InvalidMintCap.selector);
-        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 0, MINT_CAP);
+        for (uint256 invalidCap; invalidCap < 4; ++invalidCap) {
+            vm.expectRevert(DeepstateMinterController.InvalidMintCap.selector);
+            new DeepstateMinterController(
+                address(this), address(deep), address(sablier), recipient, invalidCap, MINT_CAP
+            );
 
-        vm.expectRevert(DeepstateMinterController.InvalidGrossIssuanceCap.selector);
-        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP, 0);
+            vm.expectRevert(DeepstateMinterController.InvalidGrossIssuanceCap.selector);
+            new DeepstateMinterController(
+                address(this), address(deep), address(sablier), recipient, MINT_CAP, invalidCap
+            );
+        }
+    }
+
+    function test_ExactMinimumCapsPermitTheSmallestMint() public {
+        DeepstateMinterController boundary =
+            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 4, 4);
+
+        _activateTokenAdministration(boundary);
+        boundary.mint(mintRecipient, 3);
+
+        assertEq(deep.balanceOf(mintRecipient), 3);
+        assertEq(deep.balanceOf(address(sablier)), 1);
+        assertEq(deep.totalSupply(), 4);
+        assertEq(boundary.grossIssued(), 4);
+    }
+
+    function test_ConstructorRequiresMinimumLiveSupplyHeadroom() public {
+        deep.grantRole(deep.MINTER_ROLE(), address(this));
+        deep.mint(address(this), 1);
+
+        vm.expectRevert(DeepstateMinterController.InvalidMintCap.selector);
+        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 4, 4);
+
+        DeepstateMinterController minimumHeadroom =
+            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 5, 4);
+        assertEq(minimumHeadroom.mintCap() - deep.totalSupply(), 4);
     }
 
     function test_RevertMintBeforeTokenAdministrationActivation() public {
@@ -326,6 +358,8 @@ contract DeepstateMinterControllerTest is Test {
     }
 
     function test_TwoStepOwnershipHandoverDoesNotMutateRoles() public {
+        minterController.grantRoles(unauthorized, minterController.MINTER_ROLE());
+
         vm.prank(newGovernance);
         minterController.requestOwnershipHandover();
         minterController.completeOwnershipHandover(newGovernance);
@@ -333,6 +367,7 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(minterController.owner(), newGovernance);
         assertEq(minterController.rolesOf(address(this)), 0);
         assertEq(minterController.rolesOf(newGovernance), 0);
+        assertEq(minterController.rolesOf(unauthorized), minterController.MINTER_ROLE());
     }
 
     function test_TransferOwnershipToCurrentOwnerPreservesRoles() public {

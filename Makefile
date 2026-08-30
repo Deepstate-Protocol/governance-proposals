@@ -1,6 +1,6 @@
 SHELL := bash
 
-.PHONY: build check check-dependencies check-layout check-live fmt lint plan-deployment test
+.PHONY: build check check-dependencies check-layout check-live fmt invariants lint plan-deployment test
 
 fmt:
 	forge fmt --check
@@ -23,6 +23,9 @@ build:
 
 test:
 	forge test --force -vvv --threads 0
+
+invariants:
+	forge test --force --match-path 'test/invariant/*.t.sol' -vvv --threads 0
 
 check-live:
 	set -Eeuo pipefail; \
