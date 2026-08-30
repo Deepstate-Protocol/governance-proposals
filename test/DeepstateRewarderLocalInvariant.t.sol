@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 
 contract RewarderInvariantToken {
     mapping(address account => uint256 balance) public balanceOf;

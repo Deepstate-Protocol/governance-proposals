@@ -11,11 +11,9 @@ lint:
 	bash -n script/check-deep-role-history.sh
 	bash -n script/check-live-deployment.sh
 	bash -n script/check-proposal-layout.sh
-	bash -n script/check-rewarder-fork.sh
 
 check-dependencies:
 	bash script/check-dependency-layout.sh
-	bash script/check-rewarder-fork.sh
 
 check-layout:
 	bash script/check-proposal-layout.sh

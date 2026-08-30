@@ -105,9 +105,9 @@
     },
     "rewarderFactory": {
       "salt": "0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a",
-      "initCodeHash": "0x538bea488bd140426bd2973dbaf1e5fd185158c1acf90d48da32014d9b94a77b",
-      "expectedRuntimeCodeHash": "0xed38b95cabe8bf218c13462655c870e48fa77a8bbdbea8e3d03316cd1853592e",
-      "predictedAddress": "0x5240b14a811c77641Aa08199C2DF42078915F665",
+      "initCodeHash": "0x7f6374300b3536877670c4cd06424afb331996c66ef87626dd0c745e7477810a",
+      "expectedRuntimeCodeHash": "0x6c9b913b9a88c52b4894e43f0015fd817f94afd6583924ddb062ad8a7cbf0d76",
+      "predictedAddress": "0x9ec28aE171d3280dE9B295A134126935C2451A00",
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x268E83228EDf691950b9458f200710A2b61AD996",

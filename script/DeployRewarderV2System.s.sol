@@ -37,7 +37,7 @@ contract DeployRewarderV2System is Script {
     bytes32 public constant V1_CONTROLLER_RUNTIME_CODE_HASH =
         0xcd85dd360a076e26501584709edcf7e6b69a73e3bb60fc0684976e172d447041;
     bytes32 public constant FACTORY_RUNTIME_CODE_HASH =
-        0xed38b95cabe8bf218c13462655c870e48fa77a8bbdbea8e3d03316cd1853592e;
+        0x6c9b913b9a88c52b4894e43f0015fd817f94afd6583924ddb062ad8a7cbf0d76;
 
     error CodeHashMismatch(address target, bytes32 expected, bytes32 actual);
     error Create2DeploymentFailed(address expected);

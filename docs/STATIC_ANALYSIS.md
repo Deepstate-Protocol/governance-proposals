@@ -1,7 +1,8 @@
 # Static-analysis triage
 
-The release runs `slither-analyzer==0.11.6` against first-party production source, with libraries, tests, and scripts
-excluded. CI fails any High-severity result. This file records the reviewed Medium detectors that remain after the
+The release runs `slither-analyzer==0.11.6` against first-party production source and the exact inherited
+`lib/deepstate-protocol/src/DeepstateRewarder.sol` base, with every other library, test, and script excluded. CI fails
+any High-severity result. This file records the reviewed Medium detectors that remain after the
 checks-effects-interactions and reentrancy hardening; a new detector or materially changed code requires fresh triage.
 
 | Detector | Scope | Disposition |

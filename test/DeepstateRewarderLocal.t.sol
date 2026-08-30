@@ -6,7 +6,7 @@ import {ERC20} from "solady/tokens/ERC20.sol";
 import {IHook} from "deepstate-contracts/interfaces/IHook.sol";
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
 
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
 contract RewardTestERC20 is ERC20 {

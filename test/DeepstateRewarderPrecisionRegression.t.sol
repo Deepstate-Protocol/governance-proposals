@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 
 contract DeepstateRewarderPrecisionRegressionTest is Test {
     address internal constant TOKEN0 = address(0x1000);

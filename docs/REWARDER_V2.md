@@ -9,7 +9,7 @@ technical review material, not a voter-facing proposal description and not an ex
 | Item | Pinned revision |
 | --- | --- |
 | Rewarder V2 source branch | [`codex/rewarder-v2` at `39a336f`](https://github.com/Deepstate-Protocol/deepstate-protocol/tree/39a336f0015d9a5c3f1029cde1191c1789e85587) |
-| Protocol base library | `adfd9a8b662d7605c195d249b78e627b3aa87b6a` |
+| Protocol base library | [`bcad2fc`](https://github.com/Deepstate-Protocol/deepstate-protocol/tree/bcad2fc831f4830255e4cb113c62b1dd4a9aacb6) |
 | Matching-engine library | `37aa0d2ecb4a1f37a45b473729c100b2991c4e2d` |
 | Sablier Lockup | `lockup@v4.0.1` at `fae38dc7e43c6cab6de8f97124c559f42ed5b77a` |
 
@@ -19,12 +19,13 @@ first-party Solidity and tests are preserved in this repository. At the time of 
 open with no recorded review or comments; its required CI checks passed. Pinning that revision records provenance and
 does not constitute a security review or audit.
 
-Unchanged `DeepstateToken`, `IOrderBook`, and `IBurnableERC20` dependencies resolve through the root-pinned
-`deepstate-protocol` library. The local `src/DeepstateRewarder.sol` is a source-pinned fork of that revision whose
-reward calculation and order accounting are unchanged; it adds the terminal lifecycle required for removed V2
-rewarders. The Factory also adds a scale-independent quantity-growth ceiling and uses 150 million DEEP of initial
-funding. Those deliberate production changes mean Rewarder V2 and Factory bytecode no longer match the original
-source branch. Deployed code hashes must be generated from this repository's artifacts.
+`DeepstateToken`, `IOrderBook`, `IBurnableERC20`, and the Rewarder base resolve through the root-pinned
+`deepstate-protocol` library. Its pinned Rewarder revision adds only a no-op virtual lifecycle hook at the five
+state-changing entry points; it does not change the base ABI, storage, reward calculation, or order-accounting
+behavior. Rewarder V2 overrides that hook with the terminal lifecycle required for removed markets. The Factory also
+adds a scale-independent quantity-growth ceiling and uses 150 million DEEP of initial funding. Those deliberate
+production changes mean Rewarder V2 and Factory bytecode no longer match the original source branch. Deployed code
+hashes must be generated from this repository's artifacts.
 
 The Sablier integration suite deploys the real v4.0.1 `SablierLockup` implementation locally with a Comptroller stub.
 A separate opt-in live fork test creates, vests, withdraws, and checks a non-cancelable/non-transferable stream through
@@ -98,11 +99,12 @@ for receipt verification.
 
 ### DeepstateRewarderV2
 
-Rewarder V2 uses a source-pinned local fork of `DeepstateRewarder` from deepstate-protocol commit
-`adfd9a8b662d7605c195d249b78e627b3aa87b6a`. It preserves that reward math and accounting while adding an owner-only,
-irreversible retire-and-burn operation and active-state gates around every reward state transition. The current
-production Rewarder V1 is unchanged. Retirement and post-retirement cleanup are non-reentrant even if an independently
-deployed instance is configured with a callback-capable reward token; production instances use the pinned DEEP token.
+Rewarder V2 directly inherits `DeepstateRewarder` from the pinned `deepstate-protocol` library. It owns the retirement
+state and overrides the base lifecycle hook, preserving the library's reward math and accounting while adding an
+owner-only, irreversible retire-and-burn operation and active-state gates around every reward state transition. The
+current production Rewarder V1 is unchanged. Retirement and post-retirement cleanup are non-reentrant even if an
+independently deployed instance is configured with a callback-capable reward token; production instances use the
+pinned DEEP token.
 
 ## Authority, funding, and lock risks
 

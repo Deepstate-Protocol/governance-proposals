@@ -8,7 +8,7 @@ import {ERC20} from "solady/tokens/ERC20.sol";
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
 
 import {DeepstateMinterController} from "../src/DeepstateMinterController.sol";
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 import {DeepstateRewarderFactory} from "../src/DeepstateRewarderFactory.sol";
 import {DeepstateRewarderV2} from "../src/DeepstateRewarderV2.sol";
 import {DeepstateV1Controller} from "../src/DeepstateV1Controller.sol";

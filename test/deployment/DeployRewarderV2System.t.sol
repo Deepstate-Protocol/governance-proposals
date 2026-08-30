@@ -76,13 +76,13 @@ contract DeployRewarderV2SystemTest is Test {
 
     address internal constant EXPECTED_MINTER = 0x3512C0E8B66e463df1cE6f55BE829Bf1ECA5b1c4;
     address internal constant EXPECTED_V1_CONTROLLER = 0x268E83228EDf691950b9458f200710A2b61AD996;
-    address internal constant EXPECTED_FACTORY = 0x5240b14a811c77641Aa08199C2DF42078915F665;
+    address internal constant EXPECTED_FACTORY = 0x9ec28aE171d3280dE9B295A134126935C2451A00;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
         0x3cd9754bbae0a797f4df364af5b4b0be2dcef16f75994ac079327af19e056526;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
         0xd25f79f39af86cde5d8b6d9cf38db7fcae0d60ff5a8d7ee9cdb4fa062d0a9e7f;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0x538bea488bd140426bd2973dbaf1e5fd185158c1acf90d48da32014d9b94a77b;
+        0x7f6374300b3536877670c4cd06424afb331996c66ef87626dd0c745e7477810a;
 
     DeployRewarderV2System internal deployment;
     DeploymentVerificationHarness internal verificationHarness;

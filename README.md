@@ -17,8 +17,9 @@ The 25-commit implementation delta from `deepstate-protocol@codex/rewarder-v2` w
 Its production contracts, three interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
 first-party files in `src/` and `test/`. In addition to the local implementation test, `make check-live` exercises the
 actual Robinhood Lockup and Deepstate Inc Safe on a fork. Unchanged protocol and matching-engine contracts remain
-pinned libraries; the local rewarder base is a documented source-pinned fork that adds terminal retirement for
-Rewarder V2 instances.
+pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinned `deepstate-protocol` library; that
+base exposes a no-op lifecycle extension hook which V2 overrides to enforce terminal retirement without copying the
+protocol's reward math into this repository.
 
 This candidate is not a concrete DGP and has not been deployed. It includes a read-only deterministic CREATE2 plan,
 release manifest template, pinned live dependencies, and a live Sablier compatibility test; it does not yet include a
@@ -67,10 +68,9 @@ proposals/DGP-NNN.md                    voter-facing description body
 script/proposals/DGPNNN/Deploy.s.sol   proposal-specific submission script
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
-src/DeepstateRewarder.sol              source-pinned rewarder base with terminal retirement
 src/DeepstateRewarderV2.sol            candidate market rewarder implementation
 lib/deepstate-contracts/               pinned matching-engine source dependency
-lib/deepstate-protocol/                pinned live-protocol source dependency
+lib/deepstate-protocol/                pinned protocol source, including the inherited Rewarder base
 src/DeepstateAddresses.sol             canonical live deployment registry
 src/DeepstateProposal.sol              deterministic payload validation and proposal ID
 script/DeepstateProposalScript.s.sol   chain, Governor, STATE, and launch preflight
@@ -101,10 +101,10 @@ make check-live
 Do not initialize upstream submodules recursively. This repository promotes every compiler dependency to an explicit,
 root-pinned library and disables automatic remapping discovery so nested copies cannot affect compilation.
 
-`make check` verifies those pins and remappings, reconstructs the local Rewarder fork from its reviewed retirement
-patch, then runs formatting, lint, the one-to-one proposal layout policy, production build-size checks, Rewarder V2
-behavioral/integration tests, shared proposal tests, and all concrete proposal fork tests. `make check-live` is
-read-only and also executes the live Sablier compatibility test against a fresh Robinhood fork.
+`make check` verifies those pins and remappings, then runs formatting, lint, the one-to-one proposal layout policy,
+production build-size checks, Rewarder V2 behavioral/integration tests, shared proposal tests, and all concrete
+proposal fork tests. `make check-live` is read-only and also executes the live Sablier compatibility test against a
+fresh Robinhood fork.
 
 ## Adding a proposal
 

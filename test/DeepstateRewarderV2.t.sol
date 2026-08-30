@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 import {DeepstateRewarderV2} from "../src/DeepstateRewarderV2.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
@@ -126,29 +126,29 @@ contract DeepstateRewarderV2Test is Test {
         bytes32 poolId = rewarder.poolId();
         rewarder.retireAndBurnBalance();
 
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         vm.prank(DEEPSTATE);
         rewarder.execute(poolId, bytes32(uint256(1)), TOKEN0, 1e18, 1);
 
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.registerClaimant(bytes32(uint256(1)), bytes32(uint256(1)));
 
         DeepstateRewarder.OrderReference[] memory orders = new DeepstateRewarder.OrderReference[](1);
         orders[0] = DeepstateRewarder.OrderReference({bookId: bytes32(uint256(1)), order: bytes32(uint256(1))});
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.registerClaimants(orders);
 
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.distributeRewards(bytes32(uint256(1)), bytes32(uint256(1)), TOKEN0);
 
         DeepstateRewarder.RewardClaim[] memory claims = new DeepstateRewarder.RewardClaim[](1);
         claims[0] =
             DeepstateRewarder.RewardClaim({bookId: bytes32(uint256(1)), order: bytes32(uint256(1)), token: TOKEN0});
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.distributeRewardsBatch(claims);
 
         rewardToken.mint(address(rewarder), 1e18);
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.distributeRewards(bytes32(uint256(1)), bytes32(uint256(1)), TOKEN0);
         assertEq(rewardToken.balanceOf(address(rewarder)), 1e18);
     }

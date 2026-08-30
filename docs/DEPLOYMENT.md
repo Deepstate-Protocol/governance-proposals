@@ -151,7 +151,8 @@ the two states prove different security invariants.
 
 ## Static-analysis scope
 
-CI pins `slither-analyzer==0.11.6`, filters dependencies, tests, and scripts, and fails High findings in first-party
-production source. This is one release gate, not an assertion that Medium or lower findings are clean. Review and record
-all remaining findings against [`STATIC_ANALYSIS.md`](STATIC_ANALYSIS.md) during release triage alongside compiler
-warnings, test results, and independent audit results.
+CI pins `slither-analyzer==0.11.6`, analyzes first-party production source plus the exact inherited protocol Rewarder
+base, filters every other dependency along with tests and scripts, and fails High findings. This is one release gate,
+not an assertion that Medium or lower findings are clean. Review and record all remaining findings against
+[`STATIC_ANALYSIS.md`](STATIC_ANALYSIS.md) during release triage alongside compiler warnings, test results, and
+independent audit results.

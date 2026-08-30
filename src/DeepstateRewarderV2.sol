@@ -4,16 +4,20 @@ pragma solidity 0.8.28;
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 
-import {DeepstateRewarder} from "./DeepstateRewarder.sol";
+import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 import {IBurnableERC20} from "deepstate-protocol/interfaces/IBurnableERC20.sol";
 
 /// @title Deepstate Rewarder V2
-/// @notice Extends the pinned rewarder with irreversible retirement and burning of remaining rewards.
+/// @notice Extends the protocol rewarder with irreversible retirement and burning of remaining rewards.
 /// @dev Ownable is inherited through DeepstateRewarder.
 contract DeepstateRewarderV2 is DeepstateRewarder, ReentrancyGuard {
+    /// @notice Whether this reward program has been permanently retired.
+    bool public retired;
+
     event RewarderRetiredAndBalanceBurned(uint256 amount);
     event RetiredRewarderBalanceBurned(address indexed caller, uint256 amount);
 
+    error RewarderRetired();
     error RewarderNotRetired();
 
     constructor(
@@ -64,5 +68,16 @@ contract DeepstateRewarderV2 is DeepstateRewarder, ReentrancyGuard {
         uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
         IBurnableERC20(rewardToken).burn(amount);
         emit RetiredRewarderBalanceBurned(msg.sender, amount);
+    }
+
+    /// @dev Permanently stops hook accounting, claimant registration, and reward distribution.
+    function _retire() internal {
+        _beforeRewarderAction();
+        retired = true;
+    }
+
+    /// @dev Applies the V2 lifecycle to every guarded entry point inherited from the protocol base.
+    function _beforeRewarderAction() internal view override {
+        if (retired) revert RewarderRetired();
     }
 }

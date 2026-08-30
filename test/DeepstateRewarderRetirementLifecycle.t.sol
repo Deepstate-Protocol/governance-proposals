@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
 
 import {DeepstateMinterController} from "../src/DeepstateMinterController.sol";
-import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
 import {DeepstateRewarderFactory} from "../src/DeepstateRewarderFactory.sol";
 import {DeepstateRewarderV2} from "../src/DeepstateRewarderV2.sol";
 import {DeepstateV1Controller} from "../src/DeepstateV1Controller.sol";
@@ -100,7 +99,7 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
 
         minterController.mint(address(rewarder), pending);
 
-        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
         rewarder.distributeRewards(bookId, aliceBid, address(token1));
 
         assertEq(deep.balanceOf(alice), 0);
