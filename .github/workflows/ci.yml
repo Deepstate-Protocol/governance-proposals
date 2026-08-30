@@ -51,9 +51,11 @@ jobs:
               forge fmt --check
               forge lint
               bash -n script/check-dependency-layout.sh
+              bash -n script/check-rewarder-fork.sh
               bash -n script/check-live-deployment.sh
               bash -n script/check-proposal-layout.sh
               bash script/check-dependency-layout.sh
+              bash script/check-rewarder-fork.sh
               bash script/check-proposal-layout.sh
               forge build --sizes --threads 0 --skip test --skip MockSablierLockupLinearV4.sol
               ;;

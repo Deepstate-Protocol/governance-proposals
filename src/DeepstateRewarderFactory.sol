@@ -31,7 +31,10 @@ contract DeepstateRewarderFactory is Ownable {
     /// @notice Maximum scheduled emissions for each side, for one billion DEEP total per market.
     uint96 public constant SIDE_EMISSION_CAP = 500_000_000e18;
     /// @notice Initial DEEP minted to each rewarder. Further funding requires governance.
-    uint256 public constant INITIAL_FUNDING = 100_000_000e18;
+    uint256 public constant INITIAL_FUNDING = 150_000_000e18;
+    /// @notice Largest permitted ratio between a side's maximum and starting full-reward quantities.
+    /// @dev This bounds numerical precision loss without constraining either quantity's absolute units.
+    uint256 public constant MAX_QUANTITY_GROWTH = 1_000_000;
 
     DeepstateV1Controller public immutable deepstateV1Controller;
     IDeepstateV1 public immutable deepstate;
@@ -45,6 +48,8 @@ contract DeepstateRewarderFactory is Ownable {
 
     mapping(bytes32 poolId => address rewarder) public activeRewarder;
     mapping(address rewarder => bytes32 poolId) public rewarderPool;
+    /// @notice Permanent pool provenance for each retired factory rewarder.
+    mapping(address rewarder => bytes32 poolId) public retiredRewarderPool;
 
     event OperatorSet(address indexed previousOperator, address indexed newOperator);
     event MarketDeployed(
@@ -64,6 +69,7 @@ contract DeepstateRewarderFactory is Ownable {
     error InvalidRewardToken();
     error InvalidPool();
     error InvalidHookFlags();
+    error QuantityGrowthTooLarge(address token, uint160 startQuantity, uint160 maxQuantity);
     error DeploymentCooldown(uint256 nextDeploymentAt);
     error ActiveMarketExists(bytes32 poolId, address rewarder);
     error ExistingPoolHook(bytes32 poolId, address hook);
@@ -105,7 +111,7 @@ contract DeepstateRewarderFactory is Ownable {
     }
 
     /// @notice Deploy, initially fund, and install a new rewarder for one pool.
-    /// @dev Both sides share a one-billion-DEEP schedule but receive only 100 million DEEP initially.
+    /// @dev Both sides share a one-billion-DEEP schedule but receive only 150 million DEEP initially.
     function deployMarket(MarketConfig calldata config)
         external
         onlyOperatorOrOwner
@@ -151,9 +157,8 @@ contract DeepstateRewarderFactory is Ownable {
         );
     }
 
-    /// @notice Remove a factory market and burn its remaining DEEP balance.
-    /// @dev Retiring a market deliberately makes its unpaid claims unclaimable unless governance
-    /// later funds the detached rewarder directly.
+    /// @notice Remove a factory market, permanently retire its rewarder, and burn its remaining DEEP balance.
+    /// @dev Retirement deliberately makes every accrued but unpaid claim permanently unclaimable.
     function removeMarket(address token0, address token1) external onlyOperatorOrOwner {
         bytes32 poolId_ = _poolId(token0, token1);
         address rewarder = activeRewarder[poolId_];
@@ -167,8 +172,9 @@ contract DeepstateRewarderFactory is Ownable {
         }
         delete activeRewarder[poolId_];
         delete rewarderPool[rewarder];
+        retiredRewarderPool[rewarder] = poolId_;
 
-        DeepstateRewarderV2(rewarder).burnBalance();
+        DeepstateRewarderV2(rewarder).retireAndBurnBalance();
 
         emit MarketRemoved(poolId_, rewarder);
     }
@@ -176,7 +182,18 @@ contract DeepstateRewarderFactory is Ownable {
     function _validateMarket(MarketConfig calldata config) private pure returns (bytes32 poolId_) {
         if (config.token0 >= config.token1) revert InvalidPool();
         if (!config.token0Active && !config.token1Active) revert InvalidHookFlags();
+        _validateQuantityGrowth(config.token0, config.token0StartQuantity, config.token0MaxQuantity);
+        _validateQuantityGrowth(config.token1, config.token1StartQuantity, config.token1MaxQuantity);
         poolId_ = keccak256(abi.encode(config.token0, config.token1));
+    }
+
+    function _validateQuantityGrowth(address token, uint160 startQuantity, uint160 maxQuantity) private pure {
+        // The pinned rewarder validates zero, ordering, and the 1,000x minimum. Multiplication is
+        // performed as uint256 so the uint160 configuration values cannot overflow this upper bound.
+        if (startQuantity == 0 || maxQuantity <= startQuantity) return;
+        if (uint256(maxQuantity) > uint256(startQuantity) * MAX_QUANTITY_GROWTH) {
+            revert QuantityGrowthTooLarge(token, startQuantity, maxQuantity);
+        }
     }
 
     function _poolId(address token0, address token1) private pure returns (bytes32 poolId_) {

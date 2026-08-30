@@ -3,14 +3,14 @@ pragma solidity 0.8.28;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
-import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
+import {DeepstateRewarder} from "./DeepstateRewarder.sol";
 import {IBurnableERC20} from "deepstate-protocol/interfaces/IBurnableERC20.sol";
 
 /// @title Deepstate Rewarder V2
-/// @notice Extends the original rewarder with owner-controlled burning of remaining rewards.
+/// @notice Extends the pinned rewarder with irreversible retirement and burning of remaining rewards.
 /// @dev Ownable is inherited through DeepstateRewarder.
 contract DeepstateRewarderV2 is DeepstateRewarder {
-    event RewardBalanceBurned(uint256 amount);
+    event RewarderRetiredAndBalanceBurned(uint256 amount);
 
     constructor(
         address owner_,
@@ -42,11 +42,14 @@ contract DeepstateRewarderV2 is DeepstateRewarder {
         )
     {}
 
-    /// @notice Burn the rewarder's entire remaining reward-token balance.
-    /// @dev Outstanding claims remain accounted for and will revert until funding is restored.
-    function burnBalance() external onlyOwner {
+    /// @notice Permanently retire this rewarder and burn its entire reward-token balance.
+    /// @dev Retirement disables accounting, claimant registration, and distribution forever. Ownership
+    /// is renounced after the burn, so neither the factory nor governance can reactivate this instance.
+    function retireAndBurnBalance() external onlyOwner {
+        _retire();
         uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
         IBurnableERC20(rewardToken).burn(amount);
-        emit RewardBalanceBurned(amount);
+        _setOwner(address(0));
+        emit RewarderRetiredAndBalanceBurned(amount);
     }
 }

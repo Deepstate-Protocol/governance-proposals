@@ -16,7 +16,8 @@ import {ISablierLockupLinearV4} from "./interfaces/ISablierLockupLinearV4.sol";
 /// @title Deepstate Minter Controller
 /// @notice Allocates 30% of every authorized DEEP issuance to a vesting recipient.
 /// @dev The recipient allocation is placed in a new non-cancelable, non-transferable Sablier
-/// Lockup v4 linear stream. This contract temporarily administers DEEP while remaining owned by governance.
+/// Lockup v4 linear stream. This contract temporarily administers and mints DEEP during an exact two-year window
+/// while remaining owned by governance.
 contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     using SafeTransferLib for address;
 
@@ -58,6 +59,7 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     error TokenAdministrationAlreadyReturned();
     error TokenAdministrationNotActive();
     error TokenAdministrationActive(uint40 endsAt);
+    error TokenAdministrationExpired(uint40 endsAt);
     error MintCapExceeded(uint256 cap, uint256 attemptedSupply);
 
     constructor(address owner_, address deepstateToken_, address sablierLockup_, address recipient_, uint256 mintCap_)
@@ -91,7 +93,8 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     }
 
     /// @notice Unlock DEEP administration to this contract's current governance owner after the term expires.
-    /// @dev Anyone may trigger the unlock at or after the exact deadline.
+    /// @dev Anyone may trigger the unlock at or after the exact deadline. The controller's token-level minter role is
+    /// revoked before it relinquishes token administration.
     function unlockTokenAdministration() external {
         uint40 endsAt = tokenAdministrationEndsAt;
         if (endsAt == 0) revert TokenAdministrationNotActive();
@@ -106,19 +109,25 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         tokenAdministrationEndsAt = type(uint40).max;
         // Grant first so DeepstateToken's final-admin invariant cannot strand the token.
         deepstateToken.grantRole(tokenAdminRole, owner_);
+        deepstateToken.revokeRole(deepstateToken.MINTER_ROLE(), address(this));
         deepstateToken.renounceRole(tokenAdminRole, address(this));
 
         emit TokenAdministrationReturned(owner_, msg.sender);
     }
 
-    /// @notice Mint the 70% primary tranche `amount` to `to` and the 30% tranche into a one-year stream.
-    /// @dev The recipient amount is `floor(amount * 30 / 70)`. Amounts that round it to zero revert.
+    /// @notice During the active administration term, mint the 70% primary tranche `amount` to `to` and the 30%
+    /// tranche into a one-year stream.
+    /// @dev The recipient amount is `floor(amount * 30 / 70)`. Amounts that round it to zero revert. Minting is
+    /// permitted only after administration is locked and strictly before its deadline.
     function mint(address to, uint256 amount)
         external
         onlyOwnerOrRoles(MINTER_ROLE)
         nonReentrant
         returns (uint256 streamId)
     {
+        uint40 endsAt = tokenAdministrationEndsAt;
+        if (endsAt == 0 || endsAt == type(uint40).max) revert TokenAdministrationNotActive();
+        if (block.timestamp >= endsAt) revert TokenAdministrationExpired(endsAt);
         if (to == address(0)) revert InvalidMintRecipient();
 
         uint256 vestingAmount = FixedPointMathLib.fullMulDiv(amount, RECIPIENT_ALLOCATION_BPS, PRIMARY_ALLOCATION_BPS);

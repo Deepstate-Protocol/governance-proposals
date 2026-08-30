@@ -35,6 +35,8 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
             new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP);
 
         deep.grantRole(deep.MINTER_ROLE(), address(minterController));
+        deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
+        minterController.lockTokenAdministration();
     }
 
     function test_RealSablierV4StreamVestsLinearlyForOneYear() public {

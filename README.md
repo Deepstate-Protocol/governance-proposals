@@ -13,11 +13,11 @@ optimized via-IR builds, pinned Foundry dependencies, type-safe calldata, propos
 
 The 25-commit implementation delta from `deepstate-protocol@codex/rewarder-v2` was relocated here at
 [pinned source revision `39a336f`](https://github.com/Deepstate-Protocol/deepstate-protocol/tree/39a336f0015d9a5c3f1029cde1191c1789e85587).
-Its five production contracts,
-three interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are first-party files in `src/` and
-`test/`. That integration test uses the real v4.0.1 Lockup implementation with a local Comptroller stub; it is not a
-live-deployment compatibility test. The unchanged protocol and matching-engine bases are pinned libraries instead of
-copied source.
+Its production contracts, three interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
+first-party files in `src/` and `test/`. That integration test uses the real v4.0.1 Lockup implementation with a local
+Comptroller stub; it is not a live-deployment compatibility test. Unchanged protocol and matching-engine contracts
+remain pinned libraries; the local rewarder base is a documented source-pinned fork that adds terminal retirement for
+Rewarder V2 instances.
 
 This candidate is not a concrete DGP. It does not yet contain a production deployment, voter-facing description,
 Governor action array, proposal ID, or live fork lifecycle test. Those artifacts depend on the chosen Sablier Lockup
@@ -64,6 +64,7 @@ proposals/DGP-NNN.md                    voter-facing description body
 script/proposals/DGPNNN/Deploy.s.sol   proposal-specific submission script
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
+src/DeepstateRewarder.sol              source-pinned rewarder base with terminal retirement
 src/DeepstateRewarderV2.sol            candidate market rewarder implementation
 lib/deepstate-contracts/               pinned matching-engine source dependency
 lib/deepstate-protocol/                pinned live-protocol source dependency
@@ -94,9 +95,10 @@ make check-live
 Do not initialize upstream submodules recursively. This repository promotes every compiler dependency to an explicit,
 root-pinned library and disables automatic remapping discovery so nested copies cannot affect compilation.
 
-`make check` verifies those pins and remappings, then runs formatting, lint, the one-to-one proposal layout policy,
-production build-size checks, Rewarder V2 behavioral/integration tests, shared proposal tests, and all concrete
-proposal fork tests. `make check-live` is read-only.
+`make check` verifies those pins and remappings, reconstructs the local Rewarder fork from its reviewed retirement
+patch, then runs formatting, lint, the one-to-one proposal layout policy, production build-size checks, Rewarder V2
+behavioral/integration tests, shared proposal tests, and all concrete proposal fork tests. `make check-live` is
+read-only.
 
 ## Adding a proposal
 

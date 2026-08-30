@@ -19,12 +19,12 @@ first-party Solidity and tests are preserved in this repository. At the time of 
 open with no recorded review or comments; its required CI checks passed. Pinning that revision records provenance and
 does not constitute a security review or audit.
 
-Three production files and four test files rewrite imports of unchanged `DeepstateToken`, `DeepstateRewarder`, and
-`IBurnableERC20` through the root-pinned `deepstate-protocol` library. Metadata-free creation and runtime bytecode for
-the production contracts matches the pinned branch revision. Full bytecode metadata differs because source paths and
-repository layout changed, so deployed code hashes must be generated from this repository's artifacts. The only
-non-import source edit removes stale “deterministic” NatSpec left behind when the branch switched factory deployment
-from `CREATE2` to `CREATE`; it does not affect runtime behavior.
+Unchanged `DeepstateToken`, `IOrderBook`, and `IBurnableERC20` dependencies resolve through the root-pinned
+`deepstate-protocol` library. The local `src/DeepstateRewarder.sol` is a source-pinned fork of that revision whose
+reward calculation and order accounting are unchanged; it adds the terminal lifecycle required for removed V2
+rewarders. The Factory also adds a scale-independent quantity-growth ceiling and uses 150 million DEEP of initial
+funding. Those deliberate production changes mean Rewarder V2 and Factory bytecode no longer match the original
+source branch. Deployed code hashes must be generated from this repository's artifacts.
 
 The Sablier integration suite deploys the real v4.0.1 `SablierLockup` implementation locally with a Comptroller stub.
 It proves the expected interface and stream behavior in that harness, but does not validate a Robinhood Chain Lockup
@@ -44,8 +44,9 @@ The controller enforces an immutable live-supply cap. The branch's intended prod
 not a hard cap in `DeepstateToken`; a future token-level minter could bypass the policy.
 
 Token administration cannot be returned early after `lockTokenAdministration()` starts the exact `2 * 365 days`
-term. At or after the deadline, anyone can trigger return to the controller's current owner. The controller retains
-its ordinary token minter role until governance later revokes it.
+term. Controlled minting is enabled by that activation and is disabled at the exact deadline. At or after the
+deadline, anyone can trigger return to the controller's current owner; the return atomically revokes the controller's
+token-level minter role before the controller relinquishes token administration.
 
 ### DeepstateV1Controller
 
@@ -54,30 +55,34 @@ capabilities. A hook manager can configure pool hooks but cannot change fees or 
 
 ### DeepstateRewarderFactory
 
-The Governor-owned factory can appoint a revocable operator. The operator or Governor may create or retire markets,
-subject to one global three-day deployment cooldown. A caller chooses the ordered token pair, both quantity-ramp
-endpoints, and the active reward sides. Factory validation requires an ordered pair, at least one active side, and no
-existing hook. The inherited rewarder also requires both quantity schedules—even for an inactive side—to have a
-nonzero start and a maximum at least 1,000 times the start. Deployment additionally depends on caller authorization,
-the global cooldown, mint-cap headroom, and successful Sablier stream creation. Each market uses these fixed factory
-constants:
+The Governor-owned factory can appoint a revocable operator. The operator or Governor may create markets subject to
+one global three-day deployment cooldown and may retire markets without a retirement cooldown. A caller chooses the
+ordered token pair, both quantity-ramp endpoints, and the active reward sides. Factory validation requires an ordered pair, at least one active side, and no
+existing hook. Both quantity schedules—even for an inactive side—must have a nonzero start and a maximum between
+1,000 and 1,000,000 times that start. This ratio bound is scale-independent: the operator can keep the USDG maximum
+at 1 million units while selecting a different absolute stock-token maximum for each pool. Deployment additionally
+depends on caller authorization, the global cooldown, mint-cap headroom, and successful Sablier stream creation. Each
+market uses these fixed factory constants:
 
 | Parameter | Value |
 | --- | ---: |
-| Initial primary funding | `100_000_000e18` DEEP |
-| Additional vested allocation | `floor(100_000_000e18 * 30 / 70)` DEEP |
+| Initial primary funding | `150_000_000e18` DEEP |
+| Additional vested allocation | `floor(150_000_000e18 * 30 / 70)` DEEP |
 | Per-side emission cap | `500_000_000e18` DEEP |
 | Emission duration | `395 days` |
 | Vesting duration | `365 days` |
 
-The factory deploys rewarders with `CREATE`, not `CREATE2`. Market removal clears a factory-installed hook and burns
-the rewarder's entire live DEEP balance. The separate recipient stream continues vesting. Burning may leave accrued
-but unpaid claims unfunded unless governance later restores funding.
+The factory deploys rewarders with `CREATE`, not `CREATE2`. Market removal clears a factory-installed hook, permanently
+retires the rewarder, burns its entire live DEEP balance, and renounces its ownership. A retired rewarder cannot process
+hook updates, register claimants, or distribute rewards even if tokens are later transferred to it. The separate
+recipient stream continues vesting, while accrued but unpaid claims in the retired rewarder are permanently forfeited.
 
 ### DeepstateRewarderV2
 
-Rewarder V2 inherits the current protocol rewarder and adds an owner-only operation that burns its complete live reward
-token balance. The current production Rewarder V1 is unchanged.
+Rewarder V2 uses a source-pinned local fork of `DeepstateRewarder` from deepstate-protocol commit
+`adfd9a8b662d7605c195d249b78e627b3aa87b6a`. It preserves that reward math and accounting while adding an owner-only,
+irreversible retire-and-burn operation and active-state gates around every reward state transition. The current
+production Rewarder V1 is unchanged.
 
 ## Authority, funding, and lock risks
 
@@ -85,13 +90,17 @@ token balance. The current production Rewarder V1 is unchanged.
   quantity ramps and active sides, and retire any factory-created market. The only rate limit is one successful launch
   every three days across the factory. Governance can revoke the operator, but there is no allowlist, per-market
   approval, market-count limit, or aggregate issuance budget below the controller's live-supply cap.
-- Every launch mints `100_000_000e18` DEEP to the new rewarder and approximately 42,857,142.857 DEEP into the
+- Every launch mints `150_000_000e18` DEEP to the new rewarder and approximately 64,285,714.286 DEEP into the
   immutable recipient's one-year stream. The rewarder nevertheless schedules as much as `1_000_000_000e18` across
-  both sides. It therefore begins 900 million DEEP short of its maximum schedule.
-- Fully funding the remaining 900 million DEEP requires a separate transfer from existing supply or new issuance. A
+  both sides. It therefore begins 850 million DEEP short of its maximum schedule. At maximum qualifying quantity on
+  both sides, the initial funding provides approximately 14.649 days of claim liquidity; it is funding, not an
+  accrual cap.
+- Fully funding the remaining 850 million DEEP requires a separate transfer from existing supply or new issuance. A
   controller mint for that amount requires the Governor or a separately authorized controller minter and also creates
-  approximately 385.714 million DEEP of additional recipient vesting. The factory has no top-up function, and the
+  approximately 364.286 million DEEP of additional recipient vesting. The factory has no top-up function, and the
   operator cannot mint a top-up unless governance separately grants it controller-level mint authority.
+- Factory launches and newly issued top-ups are available only before the minter controller's exact 730-day deadline.
+  At and after that deadline every controller mint reverts, so later funding must come from existing DEEP supply.
 - The Governor, as controller owner, can call `mint` directly without holding the controller's delegated `MINTER_ROLE`.
   It can select any primary recipient and amount, subject to the paired vesting calculation and live-supply cap. The
   factory is therefore not the controller's exclusive issuance path.
@@ -100,12 +109,14 @@ token balance. The current production Rewarder V1 is unchanged.
   during the exact 730-day lock. A bad immutable Sablier endpoint can make every controlled mint revert while no bypass
   minter or accessible token admin remains.
 - Retiring a market burns all DEEP still held by its rewarder, including funding needed for accrued but unpaid claims.
-  The already-created recipient stream is unaffected. Restoring detached claims would require a later governance mint.
+  The already-created recipient stream is unaffected. Retirement is terminal for that Rewarder, so those claims cannot
+  be restored; the same pool may be relaunched after the deployment cooldown with a fresh Rewarder, schedule, mint,
+  and recipient stream.
 
 ## Candidate activation sequence
 
-The source branch describes this intended sequence, but this repository deliberately does not encode it until all
-production inputs and deployed addresses are fixed.
+The three dictated proposals require a staged sequence. This repository deliberately does not encode the executable
+payloads until all production inputs and deployed addresses are fixed.
 
 Before proposal submission:
 
@@ -116,20 +127,31 @@ Before proposal submission:
 4. Deploy `DeepstateRewarderFactory(GOVERNOR, V1_CONTROLLER, MINTER_CONTROLLER)`.
 5. Verify source, constructor immutables, runtime bytecode, ownership, and deployment provenance for all three.
 
-The atomic governance payload is expected to:
+The first proposal's atomic payload is expected to:
 
-1. grant DEEP's default admin role to the minter controller;
-2. call `lockTokenAdministration()`;
-3. revoke every token-level minter that could bypass the controller policy;
-4. renounce the Governor's DEEP default admin role, leaving the controller as sole admin;
-5. grant the factory the minter controller's controller-level `MINTER_ROLE`;
-6. transfer the live router to the V1 controller;
-7. grant the factory the V1 controller's `HOOK_MANAGER_ROLE`; and
-8. optionally set the explicitly approved operator.
+1. temporarily grant the Governor DEEP's token-level `MINTER_ROLE`;
+2. mint exactly 300 million DEEP to the Governor and create the specified non-cancelable, non-transferable one-year
+   linear Sablier stream for the complete amount, with no cliff or initial unlock;
+3. revoke the Governor's temporary token-level minter role;
+4. grant DEEP's default admin role to the minter controller and call `lockTokenAdministration()`;
+5. revoke every other token-level minter that could bypass the controller policy; and
+6. renounce the Governor's DEEP default admin role last, leaving the controller as sole token admin and minter.
 
-An exact DGP test must prove these postconditions, all constructor immutables, the two-year deadline, unchanged router
-fees and existing hooks, unchanged DEEP supply, zero new Sablier streams, empty factory market mappings, and
-`nextDeploymentAt() == 0`. The factory itself must not receive DEEP's token-level minter role.
+The second proposal is expected to make one controlled 10-million-DEEP primary mint to the Governor, creating the
+corresponding Deepstate Inc stream, and then transfer the exact three volunteer allocations from the Governor.
+
+The third proposal's atomic payload is expected to:
+
+1. grant the factory the minter controller's controller-level `MINTER_ROLE`;
+2. transfer the live router to the V1 controller;
+3. grant the factory the V1 controller's `HOOK_MANAGER_ROLE`; and
+4. set the explicitly approved operator.
+
+The first proposal's fork test must prove the 300-million-DEEP supply increase, exact Sablier stream, constructor
+immutables, exact 730-day deadline, exhaustive sole-admin/minter state, and unchanged Router configuration. The third
+proposal's fork test must prove unchanged supply and stream count during permission activation, unchanged fees and
+existing hooks, empty factory market mappings, and `nextDeploymentAt() == 0`. The factory itself must never receive
+DEEP's token-level minter role.
 
 ## Inputs required before creating a DGP
 

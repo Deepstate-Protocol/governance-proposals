@@ -13,6 +13,7 @@ lint:
 
 check-dependencies:
 	bash script/check-dependency-layout.sh
+	bash script/check-rewarder-fork.sh
 
 check-layout:
 	bash script/check-proposal-layout.sh

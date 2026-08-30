@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 
+import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
 import {DeepstateRewarderV2} from "../src/DeepstateRewarderV2.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
@@ -46,38 +47,83 @@ contract DeepstateRewarderV2Test is Test {
         assertEq(rewarder.sideEmissionCap(), SIDE_CAP);
     }
 
-    function test_OwnerCanBurnEntireLiveRewardBalance() public {
+    function test_OwnerCanPermanentlyRetireAndBurnEntireLiveRewardBalance() public {
         uint256 funding = rewardToken.balanceOf(address(rewarder));
 
         vm.expectEmit(false, false, false, true, address(rewarder));
-        emit DeepstateRewarderV2.RewardBalanceBurned(funding);
-        rewarder.burnBalance();
+        emit DeepstateRewarderV2.RewarderRetiredAndBalanceBurned(funding);
+        rewarder.retireAndBurnBalance();
 
+        assertTrue(rewarder.retired());
+        assertEq(rewarder.owner(), address(0));
         assertEq(rewardToken.balanceOf(address(rewarder)), 0);
         assertEq(rewardToken.totalSupply(), 0);
     }
 
-    function test_NonOwnerCannotBurnRewardBalance() public {
+    function test_NonOwnerCannotRetireRewarderOrBurnBalance() public {
         uint256 fundingBefore = rewardToken.balanceOf(address(rewarder));
 
         vm.expectRevert(Ownable.Unauthorized.selector);
         vm.prank(alice);
-        rewarder.burnBalance();
+        rewarder.retireAndBurnBalance();
 
+        assertFalse(rewarder.retired());
+        assertEq(rewarder.owner(), address(this));
         assertEq(rewardToken.balanceOf(address(rewarder)), fundingBefore);
         assertEq(rewardToken.totalSupply(), fundingBefore);
     }
 
-    function test_BurnBalanceEmitsZeroForEmptyRewarder() public {
+    function test_RetirementEmitsZeroForEmptyRewarder() public {
         uint256 funding = rewardToken.balanceOf(address(rewarder));
-        rewarder.burnBalance();
+        vm.prank(address(rewarder));
+        rewardToken.burn(funding);
 
         vm.expectEmit(false, false, false, true, address(rewarder));
-        emit DeepstateRewarderV2.RewardBalanceBurned(0);
-        rewarder.burnBalance();
+        emit DeepstateRewarderV2.RewarderRetiredAndBalanceBurned(0);
+        rewarder.retireAndBurnBalance();
 
         assertEq(funding, uint256(SIDE_CAP) * 2);
+        assertTrue(rewarder.retired());
+        assertEq(rewarder.owner(), address(0));
         assertEq(rewardToken.balanceOf(address(rewarder)), 0);
         assertEq(rewardToken.totalSupply(), 0);
+    }
+
+    function test_RetirementPermanentlyGatesAllRewardStateTransitions() public {
+        bytes32 poolId = rewarder.poolId();
+        rewarder.retireAndBurnBalance();
+
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        vm.prank(DEEPSTATE);
+        rewarder.execute(poolId, bytes32(uint256(1)), TOKEN0, 1e18, 1);
+
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        rewarder.registerClaimant(bytes32(uint256(1)), bytes32(uint256(1)));
+
+        DeepstateRewarder.OrderReference[] memory orders = new DeepstateRewarder.OrderReference[](1);
+        orders[0] = DeepstateRewarder.OrderReference({bookId: bytes32(uint256(1)), order: bytes32(uint256(1))});
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        rewarder.registerClaimants(orders);
+
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        rewarder.distributeRewards(bytes32(uint256(1)), bytes32(uint256(1)), TOKEN0);
+
+        DeepstateRewarder.RewardClaim[] memory claims = new DeepstateRewarder.RewardClaim[](1);
+        claims[0] =
+            DeepstateRewarder.RewardClaim({bookId: bytes32(uint256(1)), order: bytes32(uint256(1)), token: TOKEN0});
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        rewarder.distributeRewardsBatch(claims);
+
+        rewardToken.mint(address(rewarder), 1e18);
+        vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
+        rewarder.distributeRewards(bytes32(uint256(1)), bytes32(uint256(1)), TOKEN0);
+        assertEq(rewardToken.balanceOf(address(rewarder)), 1e18);
+    }
+
+    function test_RetirementCannotBeRepeatedAfterOwnershipIsRenounced() public {
+        rewarder.retireAndBurnBalance();
+
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        rewarder.retireAndBurnBalance();
     }
 }

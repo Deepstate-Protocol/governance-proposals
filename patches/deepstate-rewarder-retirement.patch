@@ -1,0 +1,47 @@
+--- DeepstateRewarder.upstream.sol
++++ DeepstateRewarder.sol
+@@ -9 +9 @@
+-import {IOrderBook} from "./interfaces/IOrderBook.sol";
++import {IOrderBook} from "deepstate-protocol/interfaces/IOrderBook.sol";
+@@ -17,0 +18,4 @@
++///
++/// Forked from `DeepstateRewarder` at deepstate-protocol commit
++/// `adfd9a8b662d7605c195d249b78e627b3aa87b6a`. This local V2 base adds only an irreversible
++/// retirement lifecycle; the reward calculation and order-accounting behavior remain pinned.
+@@ -76,0 +81,3 @@
++    /// @notice Whether this reward program has been permanently retired.
++    bool public retired;
++
+@@ -90,0 +98 @@
++    error RewarderRetired();
+@@ -91,0 +100,5 @@
++    modifier whenActive() {
++        _requireActive();
++        _;
++    }
++
+@@ -255,0 +269 @@
++        whenActive
+@@ -298 +312 @@
+-    function registerClaimant(bytes32 bookId, bytes32 order) external returns (address claimant) {
++    function registerClaimant(bytes32 bookId, bytes32 order) external whenActive returns (address claimant) {
+@@ -304 +318 @@
+-    function registerClaimants(OrderReference[] calldata orders) external returns (address claimant) {
++    function registerClaimants(OrderReference[] calldata orders) external whenActive returns (address claimant) {
+@@ -319 +333 @@
+-    function distributeRewards(bytes32 bookId, bytes32 order, address token) external {
++    function distributeRewards(bytes32 bookId, bytes32 order, address token) external whenActive {
+@@ -330 +344 @@
+-    function distributeRewardsBatch(RewardClaim[] calldata claims) external {
++    function distributeRewardsBatch(RewardClaim[] calldata claims) external whenActive {
+@@ -351,0 +366,10 @@
++    /// @dev Permanently stops hook accounting, claimant registration, and reward distribution.
++    function _retire() internal {
++        _requireActive();
++        retired = true;
++    }
++
++    function _requireActive() internal view {
++        if (retired) revert RewarderRetired();
++    }
++
