@@ -19,4 +19,6 @@ restriction before computing the description hash and pinned proposal ID.
 
 | Proposal | Status | Summary |
 | --- | --- | --- |
-| — | Candidate only | Rewarder V2 implementation imported; awaiting production inputs and a dictated DGP. |
+| [`DGP-001`](drafts/DGP-001.md) | Draft | Establish the Deepstate Inc endowment and activate the two-year controlled-minting policy. |
+| [`DGP-002`](drafts/DGP-002.md) | Draft | Allocate exactly 10 million DEEP to three volunteer team members. |
+| [`DGP-003`](drafts/DGP-003.md) | Draft | Activate the constrained Rewarder V2 market-deployment authority. |

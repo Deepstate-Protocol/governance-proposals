@@ -1,8 +1,9 @@
 # Deepstate governance proposals
 
 Foundry project for authoring, reviewing, simulating, and submitting proposals to the live Deepstate Governor. The
-repository contains the Rewarder V2 candidate implementation, but no submission-ready governance proposal yet.
-Concrete proposals are added one at a time only after their production inputs are specified.
+repository contains the hardened Rewarder V2 release candidate and deterministic deployment tooling, but no
+submission-ready governance proposal yet. The three dictated descriptions remain drafts until the system contracts
+are deployed and their addresses, runtime hashes, receipts, and proposal fork block are pinned.
 
 The project follows the Solidity and deployment conventions in
 [`deepstate-contracts`](https://github.com/Deepstate-Protocol/deepstate-contracts) and
@@ -14,16 +15,15 @@ optimized via-IR builds, pinned Foundry dependencies, type-safe calldata, propos
 The 25-commit implementation delta from `deepstate-protocol@codex/rewarder-v2` was relocated here at
 [pinned source revision `39a336f`](https://github.com/Deepstate-Protocol/deepstate-protocol/tree/39a336f0015d9a5c3f1029cde1191c1789e85587).
 Its production contracts, three interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
-first-party files in `src/` and `test/`. That integration test uses the real v4.0.1 Lockup implementation with a local
-Comptroller stub; it is not a live-deployment compatibility test. Unchanged protocol and matching-engine contracts
-remain pinned libraries; the local rewarder base is a documented source-pinned fork that adds terminal retirement for
+first-party files in `src/` and `test/`. In addition to the local implementation test, `make check-live` exercises the
+actual Robinhood Lockup and Deepstate Inc Safe on a fork. Unchanged protocol and matching-engine contracts remain
+pinned libraries; the local rewarder base is a documented source-pinned fork that adds terminal retirement for
 Rewarder V2 instances.
 
-This candidate is not a concrete DGP. It does not yet contain a production deployment, voter-facing description,
-Governor action array, proposal ID, or live fork lifecycle test. Those artifacts depend on the chosen Sablier Lockup
-v4 deployment, vesting recipient, operator, deployed controller/factory addresses, mint-cap confirmation, and a
-complete inventory of token-level minters to revoke. See [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the exact
-scope, provenance, authority model, and pending activation inputs.
+This candidate is not a concrete DGP and has not been deployed. It includes a read-only deterministic CREATE2 plan,
+release manifest template, pinned live dependencies, and a live Sablier compatibility test; it does not yet include a
+submission-ready Governor action array or proposal ID. See [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the
+authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the production release procedure.
 
 ## Live target
 
@@ -42,9 +42,10 @@ source is the [Deepstate documentation](https://deepstate.sh/docs), specifically
 [Network & Addresses](https://docs-production-cdea.up.railway.app/contracts/deployments/) page, which says the
 production addresses were recorded on August 16, 2026. Run `make check-live` before authoring or
 submitting a proposal. The current check is specifically the Rewarder V2 **pre-activation** baseline: at one snapshot
-block it verifies contract presence; exact runtime code hashes for the Governor, DEEP, STATE, Router, and Rewarder V1;
-token decimals; Governor identity, clock, voting token, and direct-execution mode; current ownership and sole DEEP
-administration; the 10-bps STATE fee; the NVDA/USDG Rewarder V1 hook; and known non-minter assumptions.
+block it verifies exact runtime/proxy implementation hashes, the replacement Sablier Comptroller and fee state, the
+Deepstate Inc Safe's sole owner/threshold/module state, proposer votes, token decimals, Governor identity and mode,
+current ownership, the 10-bps STATE fee, the NVDA/USDG Rewarder V1 hook, and DEEP's exhaustive five-event role history
+from its pinned deployment block through the snapshot.
 
 Rewarder V2 activation intentionally changes Router ownership and DEEP administration, so this pre-activation check
 must fail after execution. A concrete DGP must add explicit pre/post-activation checks or replace the baseline after a
@@ -71,6 +72,9 @@ lib/deepstate-protocol/                pinned live-protocol source dependency
 src/DeepstateAddresses.sol             canonical live deployment registry
 src/DeepstateProposal.sol              deterministic payload validation and proposal ID
 script/DeepstateProposalScript.s.sol   chain, Governor, STATE, and launch preflight
+script/DeployRewarderV2System.s.sol    read-only plan and guarded idempotent CREATE2 deployment
+deployments/robinhood-4663/            production release manifest template and completed records
+docs/DEPLOYMENT.md                     deployment, verification, and activation runbook
 templates/proposal/                     files copied for each new proposal
 ```
 
@@ -98,7 +102,7 @@ root-pinned library and disables automatic remapping discovery so nested copies 
 `make check` verifies those pins and remappings, reconstructs the local Rewarder fork from its reviewed retirement
 patch, then runs formatting, lint, the one-to-one proposal layout policy, production build-size checks, Rewarder V2
 behavioral/integration tests, shared proposal tests, and all concrete proposal fork tests. `make check-live` is
-read-only.
+read-only and also executes the live Sablier compatibility test against a fresh Robinhood fork.
 
 ## Adding a proposal
 
@@ -231,4 +235,5 @@ At repository initialization, the live configuration was a three-day voting dela
 late-quorum extension, 1% delegated-vote proposal threshold, and 10% quorum. These settings are governance-controlled;
 scripts and reviews must query the live Governor instead of assuming they are unchanged.
 
-See [SECURITY.md](SECURITY.md) for the proposal review and key-handling checklist.
+See [SECURITY.md](SECURITY.md) for the proposal review and key-handling checklist and
+[`docs/STATIC_ANALYSIS.md`](docs/STATIC_ANALYSIS.md) for the reviewed Slither triage.

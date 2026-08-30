@@ -31,11 +31,13 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
         deep = new DeepstateToken(address(this), "Deepstate", "DEEP");
         SablierComptrollerStub comptroller = new SablierComptrollerStub();
         sablier = new SablierLockup(address(comptroller), address(0));
-        minterController =
-            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP);
+        minterController = new DeepstateMinterController(
+            address(this), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP
+        );
 
         deep.grantRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
+        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
         minterController.lockTokenAdministration();
     }
 
@@ -62,6 +64,7 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
         assertEq(deep.balanceOf(address(minterController)), 0);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
         assertEq(deep.totalSupply(), 70e18 + vestingAmount);
+        assertEq(minterController.grossIssued(), 70e18 + vestingAmount);
 
         vm.warp(startTime + 365 days / 2);
         assertEq(sablier.streamedAmountOf(streamId), vestingAmount / 2);
@@ -84,6 +87,7 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
         uint256 streamId = minterController.mint(mintRecipient, 70e18);
 
         vm.expectRevert();
+        vm.prank(address(minterController));
         sablier.cancel(streamId);
 
         vm.expectRevert();
@@ -96,7 +100,9 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
 
     function test_RealSablierConsumesOnlyNewlyMintedVestingAmount() public {
         uint256 preexistingBalance = 11e18;
-        deep.grantRole(deep.MINTER_ROLE(), address(this));
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        vm.prank(address(minterController));
+        deep.grantRole(tokenMinterRole, address(this));
         deep.mint(address(minterController), preexistingBalance);
 
         uint256 streamId = minterController.mint(mintRecipient, 70e18);

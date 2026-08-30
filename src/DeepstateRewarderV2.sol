@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 
 import {DeepstateRewarder} from "./DeepstateRewarder.sol";
 import {IBurnableERC20} from "deepstate-protocol/interfaces/IBurnableERC20.sol";
@@ -9,8 +10,11 @@ import {IBurnableERC20} from "deepstate-protocol/interfaces/IBurnableERC20.sol";
 /// @title Deepstate Rewarder V2
 /// @notice Extends the pinned rewarder with irreversible retirement and burning of remaining rewards.
 /// @dev Ownable is inherited through DeepstateRewarder.
-contract DeepstateRewarderV2 is DeepstateRewarder {
+contract DeepstateRewarderV2 is DeepstateRewarder, ReentrancyGuard {
     event RewarderRetiredAndBalanceBurned(uint256 amount);
+    event RetiredRewarderBalanceBurned(address indexed caller, uint256 amount);
+
+    error RewarderNotRetired();
 
     constructor(
         address owner_,
@@ -44,12 +48,21 @@ contract DeepstateRewarderV2 is DeepstateRewarder {
 
     /// @notice Permanently retire this rewarder and burn its entire reward-token balance.
     /// @dev Retirement disables accounting, claimant registration, and distribution forever. Ownership
-    /// is renounced after the burn, so neither the factory nor governance can reactivate this instance.
-    function retireAndBurnBalance() external onlyOwner {
+    /// is renounced before the external token call, so neither reentrancy nor governance can reactivate this instance.
+    function retireAndBurnBalance() external onlyOwner nonReentrant {
         _retire();
+        _setOwner(address(0));
         uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
         IBurnableERC20(rewardToken).burn(amount);
-        _setOwner(address(0));
         emit RewarderRetiredAndBalanceBurned(amount);
+    }
+
+    /// @notice Burn any reward tokens sent directly to this rewarder after its retirement.
+    /// @dev Permissionless cleanup prevents mistaken or adversarial transfers from becoming permanently stranded.
+    function burnRetiredBalance() external nonReentrant {
+        if (!retired) revert RewarderNotRetired();
+        uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
+        IBurnableERC20(rewardToken).burn(amount);
+        emit RetiredRewarderBalanceBurned(msg.sender, amount);
     }
 }

@@ -3,10 +3,39 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
+import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 
 import {DeepstateRewarder} from "../src/DeepstateRewarder.sol";
 import {DeepstateRewarderV2} from "../src/DeepstateRewarderV2.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
+
+contract ReentrantBurnToken {
+    mapping(address account => uint256 balance) public balanceOf;
+    address public reentryTarget;
+    bytes public reentryData;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function setReentry(address target, bytes calldata data) external {
+        reentryTarget = target;
+        reentryData = data;
+    }
+
+    function burn(uint256 amount) external {
+        address target = reentryTarget;
+        if (target != address(0)) {
+            (bool success, bytes memory result) = target.call(reentryData);
+            if (!success) {
+                assembly ("memory-safe") {
+                    revert(add(result, 0x20), mload(result))
+                }
+            }
+        }
+        balanceOf[msg.sender] -= amount;
+    }
+}
 
 contract DeepstateRewarderV2Test is Test {
     uint96 internal constant SIDE_CAP = 500_000_000e18;
@@ -60,12 +89,16 @@ contract DeepstateRewarderV2Test is Test {
         assertEq(rewardToken.totalSupply(), 0);
     }
 
-    function test_NonOwnerCannotRetireRewarderOrBurnBalance() public {
+    function test_NonOwnerCannotRetireActiveRewarderOrBurnItsBalance() public {
         uint256 fundingBefore = rewardToken.balanceOf(address(rewarder));
 
         vm.expectRevert(Ownable.Unauthorized.selector);
         vm.prank(alice);
         rewarder.retireAndBurnBalance();
+
+        vm.expectRevert(DeepstateRewarderV2.RewarderNotRetired.selector);
+        vm.prank(alice);
+        rewarder.burnRetiredBalance();
 
         assertFalse(rewarder.retired());
         assertEq(rewarder.owner(), address(this));
@@ -120,10 +153,63 @@ contract DeepstateRewarderV2Test is Test {
         assertEq(rewardToken.balanceOf(address(rewarder)), 1e18);
     }
 
+    function test_AnyoneCanBurnTokensDirectlySentAfterRetirement() public {
+        rewarder.retireAndBurnBalance();
+        rewardToken.mint(address(rewarder), 7e18);
+
+        vm.expectEmit(true, false, false, true, address(rewarder));
+        emit DeepstateRewarderV2.RetiredRewarderBalanceBurned(alice, 7e18);
+        vm.prank(alice);
+        rewarder.burnRetiredBalance();
+
+        assertEq(rewardToken.balanceOf(address(rewarder)), 0);
+        assertEq(rewardToken.totalSupply(), 0);
+
+        vm.expectEmit(true, false, false, true, address(rewarder));
+        emit DeepstateRewarderV2.RetiredRewarderBalanceBurned(alice, 0);
+        vm.prank(alice);
+        rewarder.burnRetiredBalance();
+    }
+
     function test_RetirementCannotBeRepeatedAfterOwnershipIsRenounced() public {
         rewarder.retireAndBurnBalance();
 
         vm.expectRevert(Ownable.Unauthorized.selector);
         rewarder.retireAndBurnBalance();
+    }
+
+    function test_MaliciousRewardTokenCannotReenterRetirementOrPartiallyCommitState() public {
+        ReentrantBurnToken maliciousToken = new ReentrantBurnToken();
+        DeepstateRewarderV2 maliciousRewarder = new DeepstateRewarderV2(
+            address(this),
+            DEEPSTATE,
+            address(maliciousToken),
+            keccak256(abi.encode(TOKEN0, TOKEN1)),
+            TOKEN0,
+            TOKEN1,
+            SIDE_CAP,
+            395 days,
+            1e18,
+            5_000e18,
+            1e6,
+            1_000_000e6
+        );
+        maliciousToken.mint(address(maliciousRewarder), 1e18);
+        maliciousToken.setReentry(
+            address(maliciousRewarder), abi.encodeCall(DeepstateRewarderV2.burnRetiredBalance, ())
+        );
+
+        vm.expectRevert(ReentrancyGuard.Reentrancy.selector);
+        maliciousRewarder.retireAndBurnBalance();
+
+        assertFalse(maliciousRewarder.retired());
+        assertEq(maliciousRewarder.owner(), address(this));
+        assertEq(maliciousToken.balanceOf(address(maliciousRewarder)), 1e18);
+
+        maliciousToken.setReentry(address(0), "");
+        maliciousRewarder.retireAndBurnBalance();
+        assertTrue(maliciousRewarder.retired());
+        assertEq(maliciousRewarder.owner(), address(0));
+        assertEq(maliciousToken.balanceOf(address(maliciousRewarder)), 0);
     }
 }

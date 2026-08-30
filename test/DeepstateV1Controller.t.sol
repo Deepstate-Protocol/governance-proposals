@@ -166,6 +166,11 @@ contract DeepstateV1ControllerTest is Test {
     function test_ControllerOwnerCannotRenounceOwnership() public {
         vm.expectRevert(Ownable.NewOwnerIsZeroAddress.selector);
         controller.renounceOwnership();
+
+        vm.expectRevert(DeepstateController.InvalidOwner.selector);
+        controller.transferOwnership(address(controller));
+
+        assertEq(controller.owner(), address(this));
     }
 
     function _poolId() private pure returns (bytes32) {

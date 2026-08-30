@@ -17,4 +17,10 @@ abstract contract DeepstateController is OwnableRoles {
     function renounceOwnership() public payable virtual override onlyOwner {
         revert NewOwnerIsZeroAddress();
     }
+
+    /// @dev A controller cannot exercise owner-only recovery paths on itself, so self-ownership would be permanent.
+    function _setOwner(address newOwner) internal virtual override {
+        if (newOwner == address(this)) revert InvalidOwner();
+        super._setOwner(newOwner);
+    }
 }

@@ -14,8 +14,14 @@ Before submission:
   archive-capable Robinhood Chain RPC;
 - confirm each privileged target is currently controlled by the Governor;
 - verify every newly deployed contract's constructor immutables, owner, runtime code hash, and source revision;
+- require a second reviewer and an independent contract audit before treating immutable mainnet bytecode as a final
+  release, even when local tests and static analysis pass;
 - reconstruct non-enumerable role membership from deployment state and historical events before revoking or replacing
   any role holder;
+- explicitly accept or remediate the Deepstate Inc Safe's signer threshold before it receives irrevocable streams and
+  revocable market-operator authority;
+- revalidate Sablier's upgradeable Comptroller implementation, admin, oracle, and withdrawal fee immediately before
+  submission and execution;
 - confirm nonzero ETH values are intentional and funded safely;
 - confirm the proposer has enough delegated historical votes, not merely enough STATE balance;
 - simulate with the exact proposer before adding `--broadcast`; and

@@ -14,6 +14,19 @@ for required_command in forge git jq; do
     command -v "$required_command" >/dev/null 2>&1 || fail "missing required command: $required_command"
 done
 
+locked_paths="$(jq -r 'keys[]' "$LOCK_FILE" | sort)"
+configured_paths="$(git config -f "$ROOT_DIR/.gitmodules" --get-regexp '^submodule\..*\.path$' \
+    | awk '{ print $2 }' | sort)"
+gitlink_paths="$(git -C "$ROOT_DIR" ls-files --stage \
+    | awk '$1 == "160000" { print $4 }' | sort)"
+
+if [[ "$locked_paths" != "$configured_paths" ]]; then
+    fail ".gitmodules paths do not exactly match foundry.lock"
+fi
+if [[ "$locked_paths" != "$gitlink_paths" ]]; then
+    fail "tracked gitlinks do not exactly match foundry.lock"
+fi
+
 while IFS= read -r dependency_path; do
     expected_revision="$(
         jq -r --arg path "$dependency_path" '.[$path].rev // .[$path].tag.rev // empty' "$LOCK_FILE"
@@ -28,6 +41,10 @@ while IFS= read -r dependency_path; do
     gitlink_revision="$(git -C "$ROOT_DIR" ls-files --stage "$dependency_path" | awk '$1 == "160000" { print $2 }')"
     [[ "$gitlink_revision" == "$expected_revision" ]] \
         || fail "$dependency_path gitlink is not pinned to $expected_revision"
+
+    if [[ -n "$(git -C "$ROOT_DIR/$dependency_path" status --porcelain --untracked-files=all)" ]]; then
+        fail "$dependency_path contains dirty or untracked files"
+    fi
 done < <(jq -r 'keys[]' "$LOCK_FILE")
 
 if ! cmp -s <(cd "$ROOT_DIR" && forge remappings) "$REMAPPINGS_FILE"; then

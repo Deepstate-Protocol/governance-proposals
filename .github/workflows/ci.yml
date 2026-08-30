@@ -51,6 +51,7 @@ jobs:
               forge fmt --check
               forge lint
               bash -n script/check-dependency-layout.sh
+              bash -n script/check-deep-role-history.sh
               bash -n script/check-rewarder-fork.sh
               bash -n script/check-live-deployment.sh
               bash -n script/check-proposal-layout.sh
@@ -67,6 +68,37 @@ jobs:
               exit 1
               ;;
           esac
+
+  static-analysis:
+    name: Required / Static Analysis (High)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Install pinned Slither
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/slither-venv"
+          "$RUNNER_TEMP/slither-venv/bin/python" -m pip install --disable-pip-version-check \
+            'slither-analyzer==0.11.6'
+
+      - name: Fail first-party production High findings
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/slither-venv/bin/slither" . \
+            --exclude-dependencies \
+            --filter-paths '(^|/)(lib|test|script)(/|$)' \
+            --fail-high
 
   proposal-fork-tests:
     name: Trusted / Proposal Fork Tests
@@ -110,3 +142,33 @@ jobs:
           fi
           ROBINHOOD_RPC_URL="$ROBINHOOD_ARCHIVE_RPC_URL" \
             forge test --force --match-path 'test/proposals/*/Proposal.t.sol' -vvv --threads 0
+
+  live-deployment:
+    name: Trusted / Live Deployment and Sablier Compatibility
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Verify live pre-activation state and Sablier behavior
+        shell: bash
+        env:
+          ROBINHOOD_RPC_URL: ${{ secrets.ROBINHOOD_ARCHIVE_RPC_URL }}
+        run: |
+          if [[ -z "${ROBINHOOD_RPC_URL:-}" ]]; then
+            printf 'ROBINHOOD_ARCHIVE_RPC_URL is required for trusted live verification.\n' >&2
+            exit 1
+          fi
+          make check-live

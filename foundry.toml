@@ -13,6 +13,7 @@ optimizer_runs = 200
 via_ir = true
 fs_permissions = [
     { access = "read", path = "./proposals" },
+    { access = "read", path = "./deployments" },
 ]
 
 [fmt]

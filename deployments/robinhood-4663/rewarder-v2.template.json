@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "status": "planned-not-deployed",
+  "chain": {
+    "name": "Robinhood Chain",
+    "chainId": 4663,
+    "releaseSnapshotBlock": null,
+    "releaseSnapshotBlockHash": null
+  },
+  "source": {
+    "gitCommit": null,
+    "gitTreeClean": null,
+    "solc": "0.8.28",
+    "evmVersion": "cancun",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "viaIR": true
+  },
+  "releasePolicy": {
+    "note": "Governance-selected conservative release policy; these values are not discovered protocol facts.",
+    "minterLiveSupplyCap": "20000000000000000000000000000",
+    "minterGrossIssuanceCap": "20000000000000000000000000000",
+    "factoryInitialPrimaryFundingBudget": "1500000000000000000000000000",
+    "factoryInitialPrimaryFundingPerMarket": "150000000000000000000000000",
+    "maximumInitiallyFundedMarkets": 10
+  },
+  "liveDependencies": {
+    "governor": {
+      "address": "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
+      "runtimeCodeHash": "0x72016f3b397262520f32391d64ecc34c6208f02570cfecac53d9ce9b2203eb31"
+    },
+    "deep": {
+      "address": "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
+      "runtimeCodeHash": "0xbaa66790940277398fa140294409b82b1bfe357f6784dc431e133aba893977da",
+      "deploymentBlock": 36932568,
+      "deploymentBlockHash": "0x825b0a72b74ea8661868132676ce26372953f214a099db9794ece645e8bd53d4"
+    },
+    "router": {
+      "address": "0x6cf19308C22FC82ea620Fa0B3E94948d20f27B96",
+      "runtimeCodeHash": "0x287d53a803f8e488b46c74c73308554c77768e4f271f208632ab6283fa73caa3"
+    },
+    "usdg": {
+      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "runtimeCodeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+      "implementation": "0x68184C449E1a8f34fA18d289737129FD27B66f8F",
+      "implementationCodeHash": "0x3a551ac5c744af57e68a1d1431ac403c0f516ffd7d224a75746aee11fc4f3baf"
+    },
+    "deepstateIncSafe": {
+      "address": "0x83fB2739abd9963c5341E4A176D93a7E5Ee73445",
+      "runtimeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
+      "singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+      "singletonCodeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff",
+      "owners": ["0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2"],
+      "threshold": 1,
+      "modules": []
+    },
+    "sablierLockupV4": {
+      "address": "0x548129a58bC230549DF7F9e33f27E77F6779ff0f",
+      "runtimeCodeHash": "0x814be48f2bf951ff8ff6d59a551d7087376cb791f3d1f455ac82a82c22b2de12",
+      "deploymentBlock": 10420411,
+      "comptroller": "0x12d70713796A9460314C282c613DE307FdED1a36",
+      "comptrollerCodeHash": "0xf76356484ac0ad9ffef49c8025506908355a417a99bfbaf3b216f029a8683ea4",
+      "comptrollerVersion": "v1.1",
+      "comptrollerImplementation": "0xdE834835d254CF5251e27c9B9eDA81632b9a6730",
+      "comptrollerImplementationCodeHash": "0xc5211d5df605d1fdc4c38436af79384daf89cbf7b6b39e1882b405c3bb04c107",
+      "lockupMinFeeUSD8": "0"
+    },
+    "create2Deployer": {
+      "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+      "runtimeCodeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+    }
+  },
+  "contracts": {
+    "minterController": {
+      "salt": "0x304c43c720fd4782c53fdae386391a6648ceb66d5392726bdc48bc3afbb7e029",
+      "initCodeHash": "0x3cd9754bbae0a797f4df364af5b4b0be2dcef16f75994ac079327af19e056526",
+      "expectedRuntimeCodeHash": "0x2556aa80b5b98e5eb02bdf8a8ce288aa86c026b0ea67e1cef7d996714fa75499",
+      "predictedAddress": "0x3512C0E8B66e463df1cE6f55BE829Bf1ECA5b1c4",
+      "constructorArguments": [
+        "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
+        "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
+        "0x548129a58bC230549DF7F9e33f27E77F6779ff0f",
+        "0x83fB2739abd9963c5341E4A176D93a7E5Ee73445",
+        "20000000000000000000000000000",
+        "20000000000000000000000000000"
+      ],
+      "deploymentTransactionHash": null,
+      "deploymentBlock": null,
+      "runtimeCodeHash": null,
+      "sourceVerified": false
+    },
+    "v1Controller": {
+      "salt": "0x082f06fa60ca7855e107a32607127f39acece481342eb9696ae09f1139dbe01a",
+      "initCodeHash": "0xd25f79f39af86cde5d8b6d9cf38db7fcae0d60ff5a8d7ee9cdb4fa062d0a9e7f",
+      "expectedRuntimeCodeHash": "0xcd85dd360a076e26501584709edcf7e6b69a73e3bb60fc0684976e172d447041",
+      "predictedAddress": "0x268E83228EDf691950b9458f200710A2b61AD996",
+      "constructorArguments": [
+        "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
+        "0x6cf19308C22FC82ea620Fa0B3E94948d20f27B96"
+      ],
+      "deploymentTransactionHash": null,
+      "deploymentBlock": null,
+      "runtimeCodeHash": null,
+      "sourceVerified": false
+    },
+    "rewarderFactory": {
+      "salt": "0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a",
+      "initCodeHash": "0x538bea488bd140426bd2973dbaf1e5fd185158c1acf90d48da32014d9b94a77b",
+      "expectedRuntimeCodeHash": "0xed38b95cabe8bf218c13462655c870e48fa77a8bbdbea8e3d03316cd1853592e",
+      "predictedAddress": "0x5240b14a811c77641Aa08199C2DF42078915F665",
+      "constructorArguments": [
+        "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
+        "0x268E83228EDf691950b9458f200710A2b61AD996",
+        "0x3512C0E8B66e463df1cE6f55BE829Bf1ECA5b1c4",
+        "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "1500000000000000000000000000"
+      ],
+      "deploymentTransactionHash": null,
+      "deploymentBlock": null,
+      "runtimeCodeHash": null,
+      "sourceVerified": false
+    }
+  },
+  "broadcast": {
+    "broadcaster": null,
+    "foundryBroadcastArtifact": null
+  },
+  "governanceActivation": {
+    "proposalIds": [],
+    "executionTransactionHashes": [],
+    "postActivationVerificationBlock": null,
+    "postActivationVerificationBlockHash": null
+  }
+}

@@ -13,11 +13,21 @@ import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 import {MockSablierLockupLinearV4} from "./mocks/MockSablierLockupLinearV4.sol";
 import {RewardDeepstateHarness, RewardTestERC20} from "./DeepstateRewarderLocal.t.sol";
 
+contract LifecycleUSDG is RewardTestERC20 {
+    constructor() RewardTestERC20("USDG", "USDG") {}
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+}
+
 contract DeepstateRewarderRetirementLifecycleTest is Test {
     uint256 internal constant MINT_CAP = 20_000_000_000e18;
 
     RewardTestERC20 internal token0;
     RewardTestERC20 internal token1;
+    RewardTestERC20 internal stock;
+    LifecycleUSDG internal usdG;
     RewardDeepstateHarness internal deepstate;
     DeepstateToken internal deep;
     DeepstateV1Controller internal deepstateV1Controller;
@@ -33,20 +43,26 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
     function setUp() public {
         vm.warp(1_000_000);
 
-        RewardTestERC20 a = new RewardTestERC20("Stock", "STOCK");
-        RewardTestERC20 b = new RewardTestERC20("USDG", "USDG");
-        (token0, token1) = address(a) < address(b) ? (a, b) : (b, a);
+        stock = new RewardTestERC20("Stock", "STOCK");
+        usdG = new LifecycleUSDG();
+        (token0, token1) = address(stock) < address(usdG)
+            ? (RewardTestERC20(address(stock)), RewardTestERC20(address(usdG)))
+            : (RewardTestERC20(address(usdG)), RewardTestERC20(address(stock)));
 
         deepstate = new RewardDeepstateHarness();
         deep = new DeepstateToken(address(this), "Deepstate", "DEEP");
         sablier = new MockSablierLockupLinearV4();
         deepstateV1Controller = new DeepstateV1Controller(address(this), address(deepstate));
-        minterController =
-            new DeepstateMinterController(address(this), address(deep), address(sablier), vestingRecipient, MINT_CAP);
-        factory = new DeepstateRewarderFactory(address(this), address(deepstateV1Controller), address(minterController));
+        minterController = new DeepstateMinterController(
+            address(this), address(deep), address(sablier), vestingRecipient, MINT_CAP, MINT_CAP
+        );
+        factory = new DeepstateRewarderFactory(
+            address(this), address(deepstateV1Controller), address(minterController), address(usdG), 1_500_000_000e18
+        );
 
         deep.grantRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
+        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
         minterController.lockTokenAdministration();
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
 
@@ -76,14 +92,13 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
         assertEq(rewarder.registerClaimant(bookId, aliceBid), alice);
 
         vm.prank(operator);
-        factory.removeMarket(address(token0), address(token1));
+        factory.removeMarket(address(stock), address(rewarder));
 
         assertTrue(rewarder.retired());
         assertEq(deep.balanceOf(address(rewarder)), 0);
         assertEq(rewarder.balances(bookId, address(token1), aliceNonce), pending);
 
-        deep.grantRole(deep.MINTER_ROLE(), address(this));
-        deep.mint(address(rewarder), pending);
+        minterController.mint(address(rewarder), pending);
 
         vm.expectRevert(DeepstateRewarder.RewarderRetired.selector);
         rewarder.distributeRewards(bookId, aliceBid, address(token1));
@@ -91,6 +106,10 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
         assertEq(deep.balanceOf(alice), 0);
         assertEq(deep.balanceOf(address(rewarder)), pending);
         assertEq(rewarder.balances(bookId, address(token1), aliceNonce), pending);
+
+        vm.prank(alice);
+        rewarder.burnRetiredBalance();
+        assertEq(deep.balanceOf(address(rewarder)), 0);
     }
 
     function test_FactoryCanRetireMarketAfterGovernanceAlreadyClearedItsHook() public {
@@ -102,7 +121,7 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
         assertEq(deepstate.poolHook(poolId), address(0));
 
         vm.prank(operator);
-        factory.removeMarket(address(token0), address(token1));
+        factory.removeMarket(address(stock), address(rewarder));
 
         assertTrue(rewarder.retired());
         assertEq(rewarder.owner(), address(0));
@@ -113,14 +132,11 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
 
     function _market() internal view returns (DeepstateRewarderFactory.MarketConfig memory config) {
         config = DeepstateRewarderFactory.MarketConfig({
-            token0: address(token0),
-            token1: address(token1),
-            token0StartQuantity: 1e18,
-            token0MaxQuantity: 5_000e18,
-            token1StartQuantity: 1e6,
-            token1MaxQuantity: 1_000_000e6,
-            token0Active: true,
-            token1Active: true
+            stockToken: address(stock),
+            stockStartQuantity: 1e18,
+            stockMaxQuantity: 5_000e18,
+            stockBuySideActive: true,
+            usdGBuySideActive: true
         });
     }
 

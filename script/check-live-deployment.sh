@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADDRESS_REGISTRY="$ROOT_DIR/src/DeepstateAddresses.sol"
 RPC_URL="${ROBINHOOD_RPC_URL:-https://rpc.mainnet.chain.robinhood.com/}"
 DEFAULT_ADMIN_ROLE=0x0000000000000000000000000000000000000000000000000000000000000000
+ZERO_ADDRESS=0x0000000000000000000000000000000000000000
+SAFE_MODULES_SENTINEL=0x0000000000000000000000000000000000000001
+ERC1967_IMPLEMENTATION_SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+SABLIER_PROTOCOL_LOCKUP=2
 
 require_command() {
     local command_name="$1"
@@ -16,6 +20,22 @@ require_command() {
 
 normalize_address() {
     cast to-check-sum-address "$1"
+}
+
+lowercase() {
+    tr '[:upper:]' '[:lower:]' <<<"$1"
+}
+
+decimal_greater_than_or_equal() {
+    local left="${1#${1%%[!0]*}}"
+    local right="${2#${2%%[!0]*}}"
+    left="${left:-0}"
+    right="${right:-0}"
+    if (( ${#left} != ${#right} )); then
+        (( ${#left} > ${#right} ))
+        return
+    fi
+    [[ "$left" == "$right" || "$left" > "$right" ]]
 }
 
 solidity_address() {
@@ -43,7 +63,24 @@ solidity_uint() {
 solidity_bytes32() {
     local name="$1"
     local value
-    value="$(sed -nE "s/.*constant ${name} = (0x[[:xdigit:]]{64});/\1/p" "$ADDRESS_REGISTRY")"
+    value="$(
+        sed -nE "/constant ${name} =/ {
+            s/.*= (0x[[:xdigit:]]{64});/\1/p
+            n
+            s/[[:space:]]*(0x[[:xdigit:]]{64});/\1/p
+        }" "$ADDRESS_REGISTRY"
+    )"
+    if [[ -z "$value" ]]; then
+        printf 'Unable to read %s from %s\n' "$name" "$ADDRESS_REGISTRY" >&2
+        exit 1
+    fi
+    printf '%s\n' "$value"
+}
+
+solidity_string() {
+    local name="$1"
+    local value
+    value="$(sed -nE "s/.*constant ${name} = \"([^\"]+)\";/\1/p" "$ADDRESS_REGISTRY")"
     if [[ -z "$value" ]]; then
         printf 'Unable to read %s from %s\n' "$name" "$ADDRESS_REGISTRY" >&2
         exit 1
@@ -82,15 +119,42 @@ EXPECTED_DEEP_CODEHASH="$(solidity_bytes32 DEEP_CODEHASH)"
 EXPECTED_STATE_CODEHASH="$(solidity_bytes32 STATE_CODEHASH)"
 EXPECTED_ROUTER_CODEHASH="$(solidity_bytes32 ROUTER_CODEHASH)"
 EXPECTED_REWARDER_CODEHASH="$(solidity_bytes32 REWARDER_CODEHASH)"
+EXPECTED_USDG_CODEHASH="$(solidity_bytes32 USDG_CODEHASH)"
+EXPECTED_USDG_IMPLEMENTATION_CODEHASH="$(solidity_bytes32 USDG_IMPLEMENTATION_CODEHASH)"
+EXPECTED_NVDA_CODEHASH="$(solidity_bytes32 NVDA_CODEHASH)"
+EXPECTED_NVDA_BEACON_CODEHASH="$(solidity_bytes32 NVDA_BEACON_CODEHASH)"
+EXPECTED_NVDA_IMPLEMENTATION_CODEHASH="$(solidity_bytes32 NVDA_IMPLEMENTATION_CODEHASH)"
+EXPECTED_SABLIER_LOCKUP_CODEHASH="$(solidity_bytes32 SABLIER_LOCKUP_CODEHASH)"
+EXPECTED_SABLIER_COMPTROLLER_CODEHASH="$(solidity_bytes32 SABLIER_COMPTROLLER_CODEHASH)"
+EXPECTED_SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH="$(solidity_bytes32 SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH)"
+EXPECTED_SAFE_CODEHASH="$(solidity_bytes32 DEEPSTATE_INC_SAFE_CODEHASH)"
+EXPECTED_SAFE_SINGLETON_CODEHASH="$(solidity_bytes32 DEEPSTATE_INC_SAFE_SINGLETON_CODEHASH)"
+EXPECTED_CREATE2_DEPLOYER_CODEHASH="$(solidity_bytes32 CREATE2_DEPLOYER_CODEHASH)"
 EXPECTED_ROUTER_FEE_BPS="$(solidity_uint ROUTER_FEE_BPS)"
 EXPECTED_NVDA_USDG_POOL_ID="$(solidity_bytes32 NVDA_USDG_POOL_ID)"
+EXPECTED_SAFE_THRESHOLD="$(solidity_uint DEEPSTATE_INC_SAFE_THRESHOLD)"
+EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD="$(solidity_uint SABLIER_LOCKUP_MIN_FEE_USD)"
+EXPECTED_SABLIER_MAX_FEE_USD="$(solidity_uint SABLIER_MAX_FEE_USD)"
+EXPECTED_SABLIER_COMPTROLLER_VERSION="$(solidity_string SABLIER_COMPTROLLER_VERSION)"
 GOVERNOR="$(solidity_address GOVERNOR)"
 DEEP="$(solidity_address DEEP)"
 STATE="$(solidity_address STATE)"
 ROUTER="$(solidity_address ROUTER)"
 REWARDER="$(solidity_address REWARDER)"
 USDG="$(solidity_address USDG)"
+USDG_IMPLEMENTATION="$(solidity_address USDG_IMPLEMENTATION)"
 NVDA="$(solidity_address NVDA)"
+NVDA_BEACON="$(solidity_address NVDA_BEACON)"
+NVDA_IMPLEMENTATION="$(solidity_address NVDA_IMPLEMENTATION)"
+DEEPSTATE_INC_SAFE="$(solidity_address DEEPSTATE_INC_SAFE)"
+DEEPSTATE_INC_SAFE_OWNER="$(solidity_address DEEPSTATE_INC_SAFE_OWNER)"
+DEEPSTATE_INC_SAFE_SINGLETON="$(solidity_address DEEPSTATE_INC_SAFE_SINGLETON)"
+PROPOSER="$(solidity_address DEEPSTATE_INC_SAFE_OWNER)"
+SABLIER_LOCKUP="$(solidity_address SABLIER_LOCKUP)"
+SABLIER_COMPTROLLER="$(solidity_address SABLIER_COMPTROLLER)"
+SABLIER_COMPTROLLER_IMPLEMENTATION="$(solidity_address SABLIER_COMPTROLLER_IMPLEMENTATION)"
+SABLIER_COMPTROLLER_ADMIN="$(solidity_address SABLIER_COMPTROLLER_ADMIN)"
+CREATE2_DEPLOYER="$(solidity_address CREATE2_DEPLOYER)"
 
 chain_id="$(cast chain-id --rpc-url "$RPC_URL")"
 if [[ "$chain_id" != "$EXPECTED_CHAIN_ID" ]]; then
@@ -101,7 +165,23 @@ fi
 SNAPSHOT_BLOCK="$(cast block-number --rpc-url "$RPC_URL")"
 SNAPSHOT_BLOCK_HASH="$(cast block "$SNAPSHOT_BLOCK" --field hash --rpc-url "$RPC_URL")"
 
-for contract_address in "$GOVERNOR" "$DEEP" "$STATE" "$ROUTER" "$REWARDER" "$USDG" "$NVDA"; do
+for contract_address in \
+    "$GOVERNOR" \
+    "$DEEP" \
+    "$STATE" \
+    "$ROUTER" \
+    "$REWARDER" \
+    "$USDG" \
+    "$USDG_IMPLEMENTATION" \
+    "$NVDA" \
+    "$NVDA_BEACON" \
+    "$NVDA_IMPLEMENTATION" \
+    "$DEEPSTATE_INC_SAFE" \
+    "$DEEPSTATE_INC_SAFE_SINGLETON" \
+    "$SABLIER_LOCKUP" \
+    "$SABLIER_COMPTROLLER" \
+    "$SABLIER_COMPTROLLER_IMPLEMENTATION" \
+    "$CREATE2_DEPLOYER"; do
     if [[ "$(cast code "$contract_address" --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK")" == "0x" ]]; then
         printf 'No contract code at %s\n' "$contract_address" >&2
         exit 1
@@ -113,7 +193,18 @@ for codehash_spec in \
     "DEEP:$DEEP:$EXPECTED_DEEP_CODEHASH" \
     "STATE:$STATE:$EXPECTED_STATE_CODEHASH" \
     "Router:$ROUTER:$EXPECTED_ROUTER_CODEHASH" \
-    "Rewarder:$REWARDER:$EXPECTED_REWARDER_CODEHASH"; do
+    "Rewarder:$REWARDER:$EXPECTED_REWARDER_CODEHASH" \
+    "USDG:$USDG:$EXPECTED_USDG_CODEHASH" \
+    "USDG implementation:$USDG_IMPLEMENTATION:$EXPECTED_USDG_IMPLEMENTATION_CODEHASH" \
+    "NVDA:$NVDA:$EXPECTED_NVDA_CODEHASH" \
+    "NVDA beacon:$NVDA_BEACON:$EXPECTED_NVDA_BEACON_CODEHASH" \
+    "NVDA implementation:$NVDA_IMPLEMENTATION:$EXPECTED_NVDA_IMPLEMENTATION_CODEHASH" \
+    "Deepstate Inc Safe:$DEEPSTATE_INC_SAFE:$EXPECTED_SAFE_CODEHASH" \
+    "Deepstate Inc Safe singleton:$DEEPSTATE_INC_SAFE_SINGLETON:$EXPECTED_SAFE_SINGLETON_CODEHASH" \
+    "Sablier Lockup:$SABLIER_LOCKUP:$EXPECTED_SABLIER_LOCKUP_CODEHASH" \
+    "Sablier Comptroller:$SABLIER_COMPTROLLER:$EXPECTED_SABLIER_COMPTROLLER_CODEHASH" \
+    "Sablier Comptroller implementation:$SABLIER_COMPTROLLER_IMPLEMENTATION:$EXPECTED_SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH" \
+    "CREATE2 deployer:$CREATE2_DEPLOYER:$EXPECTED_CREATE2_DEPLOYER_CODEHASH"; do
     codehash_label="${codehash_spec%%:*}"
     codehash_rest="${codehash_spec#*:}"
     codehash_address="${codehash_rest%%:*}"
@@ -125,6 +216,102 @@ for codehash_spec in \
         exit 1
     fi
 done
+
+usdg_implementation_word="$(
+    cast storage "$USDG" "$ERC1967_IMPLEMENTATION_SLOT" --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK"
+)"
+require_address "USDG ERC-1967 implementation" "0x${usdg_implementation_word: -40}" "$USDG_IMPLEMENTATION"
+require_address \
+    "NVDA beacon implementation" \
+    "$(rpc_call "$NVDA_BEACON" 'implementation()(address)')" \
+    "$NVDA_IMPLEMENTATION"
+
+require_address \
+    "Sablier Lockup Comptroller" \
+    "$(rpc_call "$SABLIER_LOCKUP" 'comptroller()(address)')" \
+    "$SABLIER_COMPTROLLER"
+
+comptroller_implementation_word="$(
+    cast storage "$SABLIER_COMPTROLLER" "$ERC1967_IMPLEMENTATION_SLOT" \
+        --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK"
+)"
+require_address \
+    "Sablier Comptroller ERC-1967 implementation" \
+    "0x${comptroller_implementation_word: -40}" \
+    "$SABLIER_COMPTROLLER_IMPLEMENTATION"
+
+comptroller_version="$(rpc_call "$SABLIER_COMPTROLLER" 'VERSION()(string)')"
+if [[ "$comptroller_version" != "\"$EXPECTED_SABLIER_COMPTROLLER_VERSION\"" ]]; then
+    printf 'Sablier Comptroller version mismatch: expected %s, received %s\n' \
+        "$EXPECTED_SABLIER_COMPTROLLER_VERSION" "$comptroller_version" >&2
+    exit 1
+fi
+require_address \
+    "Sablier Comptroller admin" \
+    "$(rpc_call "$SABLIER_COMPTROLLER" 'admin()(address)')" \
+    "$SABLIER_COMPTROLLER_ADMIN"
+require_address \
+    "Sablier Comptroller oracle" \
+    "$(rpc_call "$SABLIER_COMPTROLLER" 'oracle()(address)')" \
+    "$ZERO_ADDRESS"
+
+sablier_max_fee_usd="$(rpc_uint "$SABLIER_COMPTROLLER" 'MAX_FEE_USD()(uint256)')"
+if [[ "$sablier_max_fee_usd" != "$EXPECTED_SABLIER_MAX_FEE_USD" ]]; then
+    printf 'Sablier maximum USD fee mismatch: expected %s, received %s\n' \
+        "$EXPECTED_SABLIER_MAX_FEE_USD" "$sablier_max_fee_usd" >&2
+    exit 1
+fi
+sablier_lockup_min_fee_usd="$(
+    rpc_uint "$SABLIER_COMPTROLLER" 'getMinFeeUSD(uint8)(uint256)' "$SABLIER_PROTOCOL_LOCKUP"
+)"
+if [[ "$sablier_lockup_min_fee_usd" != "$EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD" ]]; then
+    printf 'Sablier Lockup minimum USD fee mismatch: expected %s, received %s\n' \
+        "$EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD" "$sablier_lockup_min_fee_usd" >&2
+    exit 1
+fi
+sablier_lockup_min_fee_wei="$(
+    rpc_uint "$SABLIER_COMPTROLLER" 'calculateMinFeeWei(uint8)(uint256)' "$SABLIER_PROTOCOL_LOCKUP"
+)"
+if [[ "$sablier_lockup_min_fee_wei" != "0" ]]; then
+    printf 'Sablier Lockup currently requires a nonzero native-token fee: %s wei\n' \
+        "$sablier_lockup_min_fee_wei" >&2
+    exit 1
+fi
+
+safe_singleton_word="$(cast storage "$DEEPSTATE_INC_SAFE" 0 --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK")"
+require_address \
+    "Deepstate Inc Safe singleton" \
+    "0x${safe_singleton_word: -40}" \
+    "$DEEPSTATE_INC_SAFE_SINGLETON"
+
+safe_owners="$(rpc_call "$DEEPSTATE_INC_SAFE" 'getOwners()(address[])')"
+expected_safe_owners="[$DEEPSTATE_INC_SAFE_OWNER]"
+if [[ "$(lowercase "$safe_owners")" != "$(lowercase "$expected_safe_owners")" ]]; then
+    printf 'Deepstate Inc Safe owner set mismatch: expected %s, received %s\n' \
+        "$expected_safe_owners" "$safe_owners" >&2
+    exit 1
+fi
+safe_threshold="$(rpc_uint "$DEEPSTATE_INC_SAFE" 'getThreshold()(uint256)')"
+if [[ "$safe_threshold" != "$EXPECTED_SAFE_THRESHOLD" ]]; then
+    printf 'Deepstate Inc Safe threshold mismatch: expected %s, received %s\n' \
+        "$EXPECTED_SAFE_THRESHOLD" "$safe_threshold" >&2
+    exit 1
+fi
+safe_modules="$(
+    rpc_call "$DEEPSTATE_INC_SAFE" 'getModulesPaginated(address,uint256)(address[],address)' \
+        "$SAFE_MODULES_SENTINEL" 100
+)"
+safe_module_list="$(sed -n '1p' <<<"$safe_modules")"
+safe_next_module="$(sed -n '2p' <<<"$safe_modules")"
+if [[ "$safe_module_list" != "[]" ]]; then
+    printf 'Deepstate Inc Safe unexpectedly has enabled modules: %s\n' "$safe_module_list" >&2
+    exit 1
+fi
+require_address "Deepstate Inc Safe module sentinel" "$safe_next_module" "$SAFE_MODULES_SENTINEL"
+if [[ "$(cast code "$DEEPSTATE_INC_SAFE_OWNER" --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK")" != "0x" ]]; then
+    printf 'Deepstate Inc Safe sole owner/proposer is no longer an EOA: %s\n' "$DEEPSTATE_INC_SAFE_OWNER" >&2
+    exit 1
+fi
 
 governor_name="$(rpc_call "$GOVERNOR" 'name()(string)')"
 if [[ "$governor_name" != '"DeepstateGovernor"' ]]; then
@@ -223,17 +410,34 @@ else
     governance_status="open"
 fi
 
+proposal_threshold="$(rpc_uint "$GOVERNOR" 'proposalThreshold()(uint256)')"
+proposer_votes="$(rpc_uint "$GOVERNOR" 'getVotes(address,uint256)(uint256)' "$PROPOSER" "$((current_clock - 1))")"
+if ! decimal_greater_than_or_equal "$proposer_votes" "$proposal_threshold"; then
+    printf 'Configured proposer has insufficient delegated votes: %s votes, %s required\n' \
+        "$proposer_votes" "$proposal_threshold" >&2
+    exit 1
+fi
+
+ROBINHOOD_RPC_URL="$RPC_URL" bash "$ROOT_DIR/script/check-deep-role-history.sh" "$SNAPSHOT_BLOCK"
+
 printf 'Deepstate live pre-activation deployment verified\n'
 printf '  snapshot block: %s\n' "$SNAPSHOT_BLOCK"
 printf '  snapshot hash: %s\n' "$SNAPSHOT_BLOCK_HASH"
 printf '  chain ID: %s\n' "$chain_id"
 printf '  Governor: %s\n' "$GOVERNOR"
 printf '  STATE: %s\n' "$STATE"
+printf '  Deepstate Inc Safe: %s (1-of-1, no modules)\n' "$DEEPSTATE_INC_SAFE"
+printf '  sole Safe owner and proposer: %s\n' "$PROPOSER"
+printf '  proposer votes: %s\n' "$proposer_votes"
+printf '  Sablier Lockup v4: %s\n' "$SABLIER_LOCKUP"
+printf '  Sablier replacement Comptroller: %s (%s, Lockup fee %s USD units)\n' \
+    "$SABLIER_COMPTROLLER" "$EXPECTED_SABLIER_COMPTROLLER_VERSION" "$sablier_lockup_min_fee_usd"
+printf '  deterministic CREATE2 deployer: %s\n' "$CREATE2_DEPLOYER"
 printf '  Router fee: %s bps to %s\n' "$router_fee_bps" "$STATE"
 printf '  NVDA/USDG hook: %s\n' "$REWARDER"
 printf '  governance start: %s (2026-08-30T07:23:58Z)\n' "$governance_start"
 printf '  governance status at snapshot: %s\n' "$governance_status"
-printf '  proposal threshold: %s\n' "$(rpc_uint "$GOVERNOR" 'proposalThreshold()(uint256)')"
+printf '  proposal threshold: %s\n' "$proposal_threshold"
 printf '  voting delay: %s seconds\n' "$(rpc_uint "$GOVERNOR" 'votingDelay()(uint256)')"
 printf '  voting period: %s seconds\n' "$(rpc_uint "$GOVERNOR" 'votingPeriod()(uint256)')"
 printf '  late-quorum extension: %s seconds\n' "$(rpc_uint "$GOVERNOR" 'lateQuorumVoteExtension()(uint48)')"

@@ -27,8 +27,9 @@ contract DeepstateMinterControllerTest is Test {
     function setUp() public {
         deep = new DeepstateToken(address(this), "Deepstate", "DEEP");
         sablier = new MockSablierLockupLinearV4();
-        minterController =
-            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP);
+        minterController = new DeepstateMinterController(
+            address(this), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP
+        );
 
         deep.grantRole(deep.MINTER_ROLE(), address(minterController));
     }
@@ -38,6 +39,8 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(address(minterController.sablierLockup()), address(sablier));
         assertEq(minterController.recipient(), recipient);
         assertEq(minterController.mintCap(), MINT_CAP);
+        assertEq(minterController.grossIssuanceCap(), MINT_CAP);
+        assertEq(minterController.grossIssued(), 0);
         assertEq(minterController.RECIPIENT_ALLOCATION_BPS(), 30_00);
         assertEq(minterController.PRIMARY_ALLOCATION_BPS(), 70_00);
         assertEq(minterController.VESTING_DURATION(), 365 days);
@@ -52,25 +55,28 @@ contract DeepstateMinterControllerTest is Test {
 
     function test_ConstructorValidation() public {
         vm.expectRevert(DeepstateController.InvalidOwner.selector);
-        new DeepstateMinterController(address(0), address(deep), address(sablier), recipient, MINT_CAP);
+        new DeepstateMinterController(address(0), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidDeepstateToken.selector);
-        new DeepstateMinterController(address(this), address(0), address(sablier), recipient, MINT_CAP);
+        new DeepstateMinterController(address(this), address(0), address(sablier), recipient, MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidDeepstateToken.selector);
-        new DeepstateMinterController(address(this), unauthorized, address(sablier), recipient, MINT_CAP);
+        new DeepstateMinterController(address(this), unauthorized, address(sablier), recipient, MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidSablierLockup.selector);
-        new DeepstateMinterController(address(this), address(deep), address(0), recipient, MINT_CAP);
+        new DeepstateMinterController(address(this), address(deep), address(0), recipient, MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidSablierLockup.selector);
-        new DeepstateMinterController(address(this), address(deep), unauthorized, recipient, MINT_CAP);
+        new DeepstateMinterController(address(this), address(deep), unauthorized, recipient, MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidRecipient.selector);
-        new DeepstateMinterController(address(this), address(deep), address(sablier), address(0), MINT_CAP);
+        new DeepstateMinterController(address(this), address(deep), address(sablier), address(0), MINT_CAP, MINT_CAP);
 
         vm.expectRevert(DeepstateMinterController.InvalidMintCap.selector);
-        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 0);
+        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, 0, MINT_CAP);
+
+        vm.expectRevert(DeepstateMinterController.InvalidGrossIssuanceCap.selector);
+        new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP, 0);
     }
 
     function test_RevertMintBeforeTokenAdministrationActivation() public {
@@ -90,6 +96,8 @@ contract DeepstateMinterControllerTest is Test {
         emit DeepstateMinterController.MintedWithVesting(
             address(this), mintRecipient, amount, recipient, vestingAmount, 1
         );
+        vm.expectEmit(false, false, false, true, address(minterController));
+        emit DeepstateMinterController.GrossIssuanceRecorded(amount + vestingAmount, amount + vestingAmount);
         uint256 streamId = minterController.mint(mintRecipient, amount);
 
         assertEq(streamId, 1);
@@ -97,6 +105,7 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(deep.balanceOf(address(sablier)), vestingAmount);
         assertEq(deep.balanceOf(address(minterController)), 0);
         assertEq(deep.totalSupply(), amount + vestingAmount);
+        assertEq(minterController.grossIssued(), amount + vestingAmount);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
 
         MockSablierLockupLinearV4.Stream memory created = sablier.stream(streamId);
@@ -118,6 +127,7 @@ contract DeepstateMinterControllerTest is Test {
     function test_LockTokenAdministrationStartsTwoYearTermAndEnsuresMinterRole() public {
         deep.revokeRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
+        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
 
         uint40 expectedEndsAt = uint40(block.timestamp + 2 * 365 days);
         vm.expectEmit(true, false, false, true, address(minterController));
@@ -138,10 +148,69 @@ contract DeepstateMinterControllerTest is Test {
         minterController.lockTokenAdministration();
 
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.ControllerNotSoleTokenAdmin.selector, uint256(2))
+        );
+        minterController.lockTokenAdministration();
+        assertEq(minterController.tokenAdministrationEndsAt(), 0);
+
+        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
         minterController.lockTokenAdministration();
 
         vm.expectRevert(DeepstateMinterController.TokenAdministrationAlreadyActivated.selector);
         minterController.lockTokenAdministration();
+    }
+
+    function test_OwnerCanRevokeExternalTokenMinterDuringAndAfterAdministrationTerm() public {
+        _lockSoleTokenAdministration();
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        vm.prank(address(minterController));
+        deep.grantRole(tokenMinterRole, unauthorized);
+
+        vm.expectEmit(true, true, false, true, address(minterController));
+        emit DeepstateMinterController.ExternalTokenMinterRevoked(unauthorized, address(this));
+        minterController.revokeExternalTokenMinter(unauthorized);
+
+        assertFalse(deep.hasRole(tokenMinterRole, unauthorized));
+        assertTrue(deep.hasRole(tokenMinterRole, address(minterController)));
+
+        vm.prank(address(minterController));
+        deep.grantRole(tokenMinterRole, unauthorized);
+        vm.warp(minterController.tokenAdministrationEndsAt());
+        minterController.revokeExternalTokenMinter(unauthorized);
+
+        assertFalse(deep.hasRole(tokenMinterRole, unauthorized));
+        assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController)));
+    }
+
+    function test_RevertExternalTokenMinterRevocationWithoutAuthorityOrAdministration() public {
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        vm.prank(unauthorized);
+        minterController.revokeExternalTokenMinter(mintRecipient);
+
+        vm.expectRevert(DeepstateMinterController.ControllerNotTokenAdmin.selector);
+        minterController.revokeExternalTokenMinter(mintRecipient);
+    }
+
+    function test_RevertExternalTokenMinterRevocationForInvalidOrInactiveAccount() public {
+        _lockSoleTokenAdministration();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.InvalidExternalTokenMinter.selector, address(0))
+        );
+        minterController.revokeExternalTokenMinter(address(0));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeepstateMinterController.InvalidExternalTokenMinter.selector, address(minterController)
+            )
+        );
+        minterController.revokeExternalTokenMinter(address(minterController));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.ExternalTokenMinterNotActive.selector, unauthorized)
+        );
+        minterController.revokeExternalTokenMinter(unauthorized);
     }
 
     function test_OwnerCannotUnlockTokenAdministrationBeforeDeadline() public {
@@ -197,6 +266,7 @@ contract DeepstateMinterControllerTest is Test {
 
         assertEq(deep.balanceOf(mintRecipient), 70e18);
         assertEq(deep.balanceOf(address(sablier)), 30e18);
+        assertEq(minterController.grossIssued(), 100e18);
     }
 
     function test_UnlockUsesCurrentOwnerAfterOwnershipTransfer() public {
@@ -220,8 +290,9 @@ contract DeepstateMinterControllerTest is Test {
     }
 
     function test_OwnerMintAuthorityRotatesWithOwnership() public {
-        DeepstateMinterController ownerController =
-            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MINT_CAP);
+        DeepstateMinterController ownerController = new DeepstateMinterController(
+            address(this), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP
+        );
         deep.grantRole(deep.MINTER_ROLE(), address(ownerController));
         _activateTokenAdministration(ownerController);
 
@@ -278,6 +349,11 @@ contract DeepstateMinterControllerTest is Test {
     function test_ControllerOwnerCannotRenounceOwnership() public {
         vm.expectRevert(Ownable.NewOwnerIsZeroAddress.selector);
         minterController.renounceOwnership();
+
+        vm.expectRevert(DeepstateController.InvalidOwner.selector);
+        minterController.transferOwnership(address(minterController));
+
+        assertEq(minterController.owner(), address(this));
     }
 
     function test_RevertUnlockBeforeLockAfterUnlockOrWithoutTokenAdmin() public {
@@ -328,9 +404,11 @@ contract DeepstateMinterControllerTest is Test {
     }
 
     function test_MintCapIncludesExistingRequestedAndVestedSupply() public {
-        DeepstateMinterController cappedController = _newControllerWithCap(100e18);
+        DeepstateMinterController cappedController = _newControllerWithCaps(100e18, MINT_CAP);
 
-        deep.grantRole(deep.MINTER_ROLE(), address(this));
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        vm.prank(address(cappedController));
+        deep.grantRole(tokenMinterRole, address(this));
         deep.mint(unauthorized, 5);
 
         vm.expectRevert(abi.encodeWithSelector(DeepstateMinterController.MintCapExceeded.selector, 100e18, 100e18 + 5));
@@ -338,29 +416,39 @@ contract DeepstateMinterControllerTest is Test {
 
         assertEq(deep.totalSupply(), 5);
         assertEq(sablier.nextStreamId(), 1);
+        assertEq(cappedController.grossIssued(), 0);
     }
 
-    function test_BurnReopensMintCapacity() public {
-        DeepstateMinterController cappedController = _newControllerWithCap(100e18);
+    function test_BurnDoesNotReopenGrossIssuanceCapacity() public {
+        DeepstateMinterController cappedController = _newControllerWithCaps(200e18, 100e18);
 
         cappedController.mint(mintRecipient, 70e18);
         assertEq(deep.totalSupply(), 100e18);
+        assertEq(cappedController.grossIssued(), 100e18);
 
-        vm.expectRevert(abi.encodeWithSelector(DeepstateMinterController.MintCapExceeded.selector, 100e18, 100e18 + 4));
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.GrossIssuanceCapExceeded.selector, 100e18, 100e18 + 4)
+        );
         cappedController.mint(mintRecipient, 3);
 
         vm.prank(mintRecipient);
         deep.burn(4);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.GrossIssuanceCapExceeded.selector, 100e18, 100e18 + 4)
+        );
         cappedController.mint(mintRecipient, 3);
 
-        assertEq(deep.totalSupply(), 100e18);
-        assertEq(deep.balanceOf(mintRecipient), 70e18 - 1);
-        assertEq(deep.balanceOf(address(sablier)), 30e18 + 1);
+        assertEq(deep.totalSupply(), 100e18 - 4);
+        assertEq(deep.balanceOf(mintRecipient), 70e18 - 4);
+        assertEq(deep.balanceOf(address(sablier)), 30e18);
+        assertEq(cappedController.grossIssued(), 100e18);
     }
 
     function test_MintPreservesPreexistingControllerBalance() public {
         _activateTokenAdministration(minterController);
-        deep.grantRole(deep.MINTER_ROLE(), address(this));
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        vm.prank(address(minterController));
+        deep.grantRole(tokenMinterRole, address(this));
         deep.mint(address(minterController), 11);
 
         minterController.mint(mintRecipient, 100e18);
@@ -415,6 +503,7 @@ contract DeepstateMinterControllerTest is Test {
 
         assertEq(deep.totalSupply(), 0);
         assertEq(sablier.nextStreamId(), 1);
+        assertEq(minterController.grossIssued(), 0);
     }
 
     function test_RevertWhenVestingAmountExceedsSablierUint128Limit() public {
@@ -428,7 +517,9 @@ contract DeepstateMinterControllerTest is Test {
 
     function test_MissingTokenMinterRoleRevertsAtomically() public {
         _activateTokenAdministration(minterController);
-        deep.revokeRole(deep.MINTER_ROLE(), address(minterController));
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        vm.prank(address(minterController));
+        deep.revokeRole(tokenMinterRole, address(minterController));
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -439,6 +530,7 @@ contract DeepstateMinterControllerTest is Test {
 
         assertEq(deep.totalSupply(), 0);
         assertEq(sablier.nextStreamId(), 1);
+        assertEq(minterController.grossIssued(), 0);
     }
 
     function test_SablierRevertRollsBackBothMints() public {
@@ -453,6 +545,7 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(deep.balanceOf(address(minterController)), 0);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
         assertEq(sablier.nextStreamId(), 1);
+        assertEq(minterController.grossIssued(), 0);
     }
 
     function test_SablierCannotReenterEvenWhenIncorrectlyGrantedMinterRole() public {
@@ -467,6 +560,7 @@ contract DeepstateMinterControllerTest is Test {
 
         assertEq(deep.totalSupply(), 0);
         assertEq(sablier.nextStreamId(), 1);
+        assertEq(minterController.grossIssued(), 0);
     }
 
     function testFuzz_MintMaintainsThirtyPercentOfCombinedIssuance(uint128 rawAmount) public {
@@ -480,13 +574,38 @@ contract DeepstateMinterControllerTest is Test {
         assertEq(deep.balanceOf(mintRecipient), amount);
         assertEq(deep.balanceOf(address(sablier)), expectedVesting);
         assertEq(deep.totalSupply(), amount + expectedVesting);
+        assertEq(minterController.grossIssued(), amount + expectedVesting);
         assertEq(expectedVesting, Math.mulDiv(deep.totalSupply(), 30_00, 100_00));
         assertEq(sablier.stream(streamId).depositAmount, expectedVesting);
     }
 
+    function testFuzz_GrossIssuanceCapIsAnExactPermanentBoundary(uint128 rawAmount, uint128 rawBurn) public {
+        uint256 maximumAmount = Math.mulDiv(MINT_CAP, 70_00, 100_00);
+        uint256 amount = bound(uint256(rawAmount), 3, maximumAmount);
+        uint256 vestingAmount = Math.mulDiv(amount, 30_00, 70_00);
+        uint256 grossCap = amount + vestingAmount;
+        DeepstateMinterController cappedController = _newControllerWithCaps(MINT_CAP, grossCap);
+
+        cappedController.mint(mintRecipient, amount);
+        assertEq(cappedController.grossIssued(), grossCap);
+
+        uint256 burnAmount = bound(uint256(rawBurn), 0, amount);
+        if (burnAmount != 0) {
+            vm.prank(mintRecipient);
+            deep.burn(burnAmount);
+        }
+
+        vm.expectRevert(
+            abi.encodeWithSelector(DeepstateMinterController.GrossIssuanceCapExceeded.selector, grossCap, grossCap + 4)
+        );
+        cappedController.mint(mintRecipient, 3);
+
+        assertEq(cappedController.grossIssued(), grossCap);
+        assertEq(deep.totalSupply(), grossCap - burnAmount);
+    }
+
     function _lockSoleTokenAdministration() internal {
         _activateTokenAdministration(minterController);
-        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
 
         assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController)));
         assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(this)));
@@ -495,11 +614,17 @@ contract DeepstateMinterControllerTest is Test {
 
     function _activateTokenAdministration(DeepstateMinterController controller) internal {
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(controller));
+        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
         controller.lockTokenAdministration();
     }
 
-    function _newControllerWithCap(uint256 cap) internal returns (DeepstateMinterController controller) {
-        controller = new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, cap);
+    function _newControllerWithCaps(uint256 liveCap, uint256 grossCap)
+        internal
+        returns (DeepstateMinterController controller)
+    {
+        controller = new DeepstateMinterController(
+            address(this), address(deep), address(sablier), recipient, liveCap, grossCap
+        );
         deep.grantRole(deep.MINTER_ROLE(), address(controller));
         _activateTokenAdministration(controller);
     }
