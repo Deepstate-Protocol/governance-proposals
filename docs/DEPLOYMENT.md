@@ -71,6 +71,12 @@ The manifest also pins the expected post-constructor runtime code hash for each 
 checks those hashes, immutable getters, zero mutable state, and zero premature Factory roles before accepting an
 existing deployment; matching getters alone are not sufficient.
 
+Controller-local roles use Solady's non-enumerable address-keyed mapping. Therefore, when either Controller target is
+already occupied, runtime/getter checks alone cannot prove that an unknown address has no delegated role. Before an
+idempotent retry is accepted for release, independently scan every `RolesUpdated(address,uint256)` event from that
+Controller's deployment block through the preflight snapshot and require an empty role inventory. Record the queried
+block range and result in the release manifest; an empty target does not need this additional history check.
+
 ## Deliberate deployment
 
 The default `run()` entrypoint is read-only. The state-changing entrypoint requires the explicit function selection and

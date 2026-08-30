@@ -103,7 +103,8 @@ contract DeployRewarderV2System is Script {
         );
     }
 
-    function _plan() private pure returns (DeploymentPlan memory plan) {
+    /// @dev Internal so the release plan can be exercised end-to-end by the offline deployment state machine.
+    function _plan() internal pure returns (DeploymentPlan memory plan) {
         plan.minterInitCode = abi.encodePacked(
             type(DeepstateMinterController).creationCode,
             abi.encode(
@@ -148,7 +149,9 @@ contract DeployRewarderV2System is Script {
         );
     }
 
-    function _deployIfMissing(bytes32 salt, bytes memory initCode, address expected) private {
+    /// @dev Internal so partial deployment and idempotent recovery can be invariant-tested without bypassing
+    /// the production entrypoint's live-dependency and confirmation gates.
+    function _deployIfMissing(bytes32 salt, bytes memory initCode, address expected) internal {
         if (expected.code.length != 0) return;
         (bool success, bytes memory result) = DeepstateAddresses.CREATE2_DEPLOYER.call(abi.encodePacked(salt, initCode));
         if (!success) {
@@ -191,7 +194,9 @@ contract DeployRewarderV2System is Script {
         }
     }
 
-    function _validateExistingDeployments(DeploymentPlan memory plan) private view {
+    /// @dev Internal so tests can prove the checked runtime, immutable configuration, and mutable release scalars at
+    /// an occupied target. Complete Controller role absence additionally requires the event-history release gate.
+    function _validateExistingDeployments(DeploymentPlan memory plan) internal view {
         if (plan.minterController.code.length != 0) _verifyMinterController(plan.minterController);
         if (plan.v1Controller.code.length != 0) _verifyV1Controller(plan.v1Controller);
         if (plan.rewarderFactory.code.length != 0) {

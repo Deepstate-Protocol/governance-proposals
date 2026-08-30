@@ -77,6 +77,7 @@ script/DeployRewarderV2System.s.sol    read-only plan and guarded idempotent CRE
 script/config/DeepstateAddresses.sol   canonical live deployment and release-policy registry
 deployments/robinhood-4663/            production release manifest template and completed records
 docs/DEPLOYMENT.md                     deployment, verification, and activation runbook
+docs/INVARIANT_COVERAGE.md             executable system-condition and external-assumption matrix
 templates/proposal/                     files copied for each new proposal
 ```
 
@@ -104,7 +105,9 @@ root-pinned library and disables automatic remapping discovery so nested copies 
 `make check` verifies those pins and remappings, then runs formatting, lint, the one-to-one proposal layout policy,
 production build-size checks, Rewarder V2 behavioral/integration tests, shared proposal tests, and all concrete
 proposal fork tests. `make check-live` is read-only and also executes the live Sablier compatibility test against a
-fresh Robinhood fork.
+fresh Robinhood fork. `make invariants` runs the dedicated deployment, activation, Minter, Factory, and Rewarder
+state machines. See [`docs/INVARIANT_COVERAGE.md`](docs/INVARIANT_COVERAGE.md) for the condition-by-condition mapping
+and the assumptions that cannot be proven by an EVM test.
 
 ## Adding a proposal
 
