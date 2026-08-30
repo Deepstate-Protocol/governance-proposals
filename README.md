@@ -55,8 +55,10 @@ the mined receipt, and make the post-activation state the baseline before review
 The official RPC is rate-limited and pruned. Set `ROBINHOOD_RPC_URL` to an archive-capable Robinhood Chain endpoint for
 pinned historical fork tests and to a dedicated endpoint for production submission. Pull-request jobs never receive
 an archive secret: they compile and discover proposal tests, while contributors run the forks locally. The trusted
-main/merge-queue/manual CI job runs concrete proposal forks and fails clearly unless `ROBINHOOD_ARCHIVE_RPC_URL` is
-configured. A public, read-only archive proxy can be added later if untrusted pull requests must run forks pre-merge.
+main/merge-queue/manual CI job requires `ROBINHOOD_ARCHIVE_RPC_URL` for concrete proposal forks. The separate live-state
+and Sablier compatibility job uses that secret when configured and otherwise falls back to the official public RPC;
+the fallback is suitable only while it continues to serve the required historical logs and fresh fork state. A public,
+read-only archive proxy can be added later if untrusted pull requests must run proposal forks pre-merge.
 
 ## Repository layout
 
