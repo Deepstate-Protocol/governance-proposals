@@ -208,13 +208,7 @@ contract DeepstateRewarderFactoryTest is Test {
         );
 
         DeepstateMinterController mismatchedMinter = new DeepstateMinterController(
-            alice,
-            address(deep),
-            address(sablier),
-            address(minterController.legacyRewarder()),
-            vestingRecipient,
-            20_000_000_000e18,
-            20_000_000_000e18
+            alice, address(deep), address(sablier), vestingRecipient, 20_000_000_000e18, 20_000_000_000e18
         );
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -267,7 +261,9 @@ contract DeepstateRewarderFactoryTest is Test {
         bool token1Active = token1 == address(stockA);
 
         vm.expectEmit(true, false, false, true, address(factory));
-        emit DeepstateRewarderFactory.MarketDeployed(poolId, address(0), token0, token1, token0Active, token1Active);
+        emit DeepstateRewarderFactory.RewarderDeployed(poolId, address(0), token0, token1, token0Active, token1Active);
+        vm.expectEmit(true, false, false, true, address(factory));
+        emit DeepstateRewarderFactory.RewarderFunded(poolId, address(0), 100_000_000e18);
         vm.prank(operator);
         DeepstateRewarderV2 rewarder = factory.deployMarket(config);
 
@@ -449,13 +445,19 @@ contract DeepstateRewarderFactoryTest is Test {
         assertEq(factory.activeRewarder(poolId), address(0));
     }
 
-    function test_GovernanceMigratesExactIdlePredecessorAndFullyFundsV2Atomically() public {
+    function test_GovernanceReplacesExactIdlePredecessorAndFundsV2Atomically() public {
         FactoryLegacyRewarderCursorMock predecessor = new FactoryLegacyRewarderCursorMock();
         (address token0, address token1) = _sort(address(stockA), address(usdG));
         bytes32 poolId = _poolId(token0, token1);
         predecessor.configure(address(deepstate), address(deep), poolId, token0, token1);
         deepstateV1Controller.setPoolHookConfig(token0, token1, address(predecessor), true, true);
 
+        vm.expectEmit(true, false, false, true, address(factory));
+        emit DeepstateRewarderFactory.RewarderDeployed(poolId, address(0), token0, token1, true, true);
+        vm.expectEmit(true, false, false, true, address(factory));
+        emit DeepstateRewarderFactory.RewarderFunded(poolId, address(0), 100_000_000e18);
+        vm.expectEmit(true, true, false, false, address(factory));
+        emit DeepstateRewarderFactory.MarketRewarderReplaced(poolId, address(predecessor), address(0));
         DeepstateRewarderV2 rewarder = factory.migrateMarket(_market(address(stockA)), address(predecessor));
 
         assertEq(deepstate.poolHook(poolId), address(rewarder));
@@ -668,7 +670,7 @@ contract DeepstateRewarderFactoryTest is Test {
         vm.expectEmit(false, false, false, true, address(rewarder));
         emit DeepstateRewarderV2.RewarderRetiredAndBalanceBurned(100_000_000e18);
         vm.expectEmit(true, true, false, false, address(factory));
-        emit DeepstateRewarderFactory.MarketRemoved(poolId, address(rewarder));
+        emit DeepstateRewarderFactory.MarketRewarderRemoved(poolId, address(rewarder));
         vm.prank(operator);
         factory.removeMarket(address(stockA), address(rewarder));
 
@@ -934,26 +936,12 @@ contract DeepstateRewarderFactoryTest is Test {
         internal
         returns (DeepstateMinterController controller_)
     {
-        FactoryLegacyRewarderCursorMock legacyRewarder = new FactoryLegacyRewarderCursorMock();
-        (address token0, address token1) = _sort(address(stockA), address(usdG));
-        legacyRewarder.configure(address(deepstate), address(token), _poolId(token0, token1), token0, token1);
-        // Four base units of recorded legacy accrual produce the smallest nonzero 30% endowment.
-        legacyRewarder.setTotalAccrued(token0, 4);
-        deepstate.setPoolHookConfig(token0, token1, address(legacyRewarder), true, true);
         controller_ = new DeepstateMinterController(
-            admin,
-            address(token),
-            address(sablier),
-            address(legacyRewarder),
-            vestingRecipient,
-            20_000_000_000e18,
-            20_000_000_000e18
+            admin, address(token), address(sablier), vestingRecipient, 20_000_000_000e18, 20_000_000_000e18
         );
-        token.grantRole(token.MINTER_ROLE(), address(controller_));
         token.grantRole(token.DEFAULT_ADMIN_ROLE(), address(controller_));
         token.renounceRole(token.DEFAULT_ADMIN_ROLE(), address(this));
         vm.prank(admin);
-        controller_.lockTokenAdministration();
-        deepstate.setPoolHookConfig(token0, token1, address(0), false, false);
+        controller_.activateTokenAdministration();
     }
 }

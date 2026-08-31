@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {DeepstateProposalScript} from "../../DeepstateProposalScript.s.sol";
 import {DeepstateAddresses} from "../../config/DeepstateAddresses.sol";
+import {DGP001Bootstrap} from "../../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../../src/DeepstateRewarderFactory.sol";
 import {DeepstateRewarderV2} from "../../../src/DeepstateRewarderV2.sol";
@@ -53,7 +54,7 @@ interface ISafeDGP002View {
 contract DeployDGP002 is DeepstateProposalScript {
     address internal constant PROPOSER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
     uint256 internal constant EXPECTED_PROPOSAL_ID =
-        6_654_724_899_027_437_755_372_567_698_267_830_192_922_209_775_984_828_280_382_998_791_025_729_780_716;
+        100_983_737_401_776_102_654_295_456_548_257_113_853_672_262_746_018_500_579_318_339_985_759_575_592_103;
 
     address public constant VOLUNTEER_A = 0x1fb3A8192d00aDe0ddC0EEcB4D872149Eb9C4157;
     address public constant VOLUNTEER_B = 0x5715d61f99487abD65D1091b5d3a46c1b2879355;
@@ -67,7 +68,7 @@ contract DeployDGP002 is DeepstateProposalScript {
 
     uint256 private constant _ACTION_COUNT = 3;
     uint256 private constant _DGP001_PROPOSAL_ID =
-        43_515_582_931_149_866_007_777_378_018_087_004_156_505_872_239_108_242_112_228_969_517_517_916_946_941;
+        104_314_577_693_082_885_786_109_683_732_203_114_255_408_942_832_054_564_539_957_851_903_575_470_305_161;
     uint256 private constant _FACTORY_MINTER_ROLE = 1;
     uint256 private constant _FACTORY_HOOK_MANAGER_ROLE = 1;
     uint256 private constant _DGP001_MARKET_FUNDING = 100_000_000e18;
@@ -132,6 +133,7 @@ contract DeployDGP002 is DeepstateProposalScript {
 
     function _validatePreconditions(bool requireFullGovernanceWindow) private view {
         DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
+        DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
         DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
         DeepstateV1Controller v1Controller = DeepstateV1Controller(DeepstateAddresses.V1_CONTROLLER);
         DeepstateRewarderFactory factory = DeepstateRewarderFactory(DeepstateAddresses.REWARDER_FACTORY);
@@ -143,6 +145,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 3);
         _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 4);
         _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 5);
+        _pre(DeepstateAddresses.DGP001_BOOTSTRAP.codehash == DeepstateAddresses.DGP001_BOOTSTRAP_CODEHASH, 71);
         _validateExternalDependencies();
 
         _pre(governor.state(_DGP001_PROPOSAL_ID) == 7, 6);
@@ -155,11 +158,11 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 13);
         _pre(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 14);
         _pre(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 15);
-        _pre(minter.legacyEndowmentCreated(), 16);
-        _pre(minter.legacyEndowmentSnapshotAt() != 0, 17);
+        _pre(bootstrap.executed(), 16);
+        _pre(bootstrap.snapshotAt() != 0, 17);
 
         uint40 administrationEndsAt = minter.tokenAdministrationEndsAt();
-        _pre(administrationEndsAt == minter.legacyEndowmentSnapshotAt() + minter.TOKEN_ADMINISTRATION_DURATION(), 18);
+        _pre(administrationEndsAt == bootstrap.snapshotAt() + minter.TOKEN_ADMINISTRATION_DURATION(), 18);
         _pre(block.timestamp < administrationEndsAt, 19);
 
         bytes32 defaultAdminRole = deep.DEFAULT_ADMIN_ROLE();
@@ -170,6 +173,8 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(deep.hasRole(tokenMinterRole, DeepstateAddresses.MINTER_CONTROLLER), 23);
         _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.GOVERNOR), 24);
         _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER_FACTORY), 25);
+        _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.DGP001_BOOTSTRAP), 72);
+        _pre(!deep.hasRole(defaultAdminRole, DeepstateAddresses.DGP001_BOOTSTRAP), 73);
         _pre(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_MINTER_ROLE, 26);
         _pre(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_HOOK_MANAGER_ROLE, 27);
 
@@ -196,7 +201,6 @@ contract DeployDGP002 is DeepstateProposalScript {
         uint256 combinedIssuance = TOTAL_PRIMARY_MINT + TOTAL_VESTING_AMOUNT;
         _pre(minter.grossIssued() <= minter.grossIssuanceCap() - combinedIssuance, 43);
         _pre(deep.totalSupply() <= minter.mintCap() - combinedIssuance, 44);
-        _pre(deep.balanceOf(DeepstateAddresses.MINTER_CONTROLLER) == 0, 45);
         _pre(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 46);
         _pre(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT == TOTAL_PRIMARY_MINT, 47);
         uint256 calculatedVesting = VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS()
@@ -209,6 +213,14 @@ contract DeployDGP002 is DeepstateProposalScript {
                 == VESTING_PER_MINT,
             49
         );
+        _pre(bootstrap.governor() == DeepstateAddresses.GOVERNOR, 74);
+        _pre(address(bootstrap.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 75);
+        _pre(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 76);
+        _pre(address(bootstrap.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 77);
+        _pre(address(bootstrap.legacyRewarder()) == DeepstateAddresses.REWARDER, 78);
+        _pre(bootstrap.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 79);
+        _pre(bootstrap.endowmentAmount() != 0 && bootstrap.streamId() != 0, 80);
+        _pre(deep.allowance(DeepstateAddresses.DGP001_BOOTSTRAP, DeepstateAddresses.SABLIER_LOCKUP) == 0, 82);
 
         if (requireFullGovernanceWindow) {
             uint256 governanceWindow =
@@ -227,7 +239,6 @@ contract DeployDGP002 is DeepstateProposalScript {
         _post(deep.balanceOf(VOLUNTEER_C) >= VOLUNTEER_C_AMOUNT, 3);
         _post(deep.totalSupply() <= minter.mintCap(), 4);
         _post(minter.grossIssued() <= minter.grossIssuanceCap(), 5);
-        _post(deep.balanceOf(DeepstateAddresses.MINTER_CONTROLLER) == 0, 6);
         _post(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 7);
 
         uint256 nextStreamId = lockup.nextStreamId();
@@ -239,6 +250,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         _post(deep.defaultAdminCount() == 1, 42);
         _post(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), DeepstateAddresses.MINTER_CONTROLLER), 43);
         _post(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.MINTER_CONTROLLER), 44);
+        _post(!deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP), 49);
         _post(block.timestamp < minter.tokenAdministrationEndsAt(), 45);
         _post(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_MINTER_ROLE, 46);
         _post(

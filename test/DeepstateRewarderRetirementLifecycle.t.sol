@@ -78,13 +78,7 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
         sablier = new MockSablierLockupLinearV4();
         deepstateV1Controller = new DeepstateV1Controller(address(this), address(deepstate));
         minterController = new DeepstateMinterController(
-            address(this),
-            address(deep),
-            address(sablier),
-            address(legacyRewarder),
-            vestingRecipient,
-            MINT_CAP,
-            MINT_CAP
+            address(this), address(deep), address(sablier), vestingRecipient, MINT_CAP, MINT_CAP
         );
         factory = new DeepstateRewarderFactory(
             address(this), address(deepstateV1Controller), address(minterController), address(usdG), 1_000_000_000e18
@@ -95,7 +89,7 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
         );
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
+        minterController.activateTokenAdministration();
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
 
         deepstate.transferOwnership(address(deepstateV1Controller));

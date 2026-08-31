@@ -24,7 +24,7 @@ base exposes a no-op lifecycle extension hook which V2 overrides to enforce term
 protocol's reward math into this repository.
 
 The system contracts have not been deployed. The repository includes a read-only deterministic CREATE2 plan, release
-manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact eight-action
+manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact ten-action
 Governor payload with a provisional pre-deployment ID. The payload is deliberately not submission-ready until its
 predicted targets are actual reviewed deployments and the final archive-fork release gates pass. See
 [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
@@ -80,6 +80,7 @@ proposals/DGP-NNN.md                    voter-facing description body
 script/proposals/DGPNNN/Deploy.s.sol   proposal-specific submission script
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
+src/DGP001Bootstrap.sol                one-use legacy-emissions endowment action for DGP-001
 src/DeepstateRewarderV2.sol            candidate market rewarder implementation
 lib/deepstate-contracts/               pinned matching-engine source dependency
 lib/deepstate-protocol/                pinned protocol source, including the inherited Rewarder base

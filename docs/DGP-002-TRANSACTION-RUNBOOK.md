@@ -8,11 +8,11 @@ DGP-001 execution and rerun the suite without deployment or market-idleness mock
 
 ## External transaction sequence
 
-1. **Reopen the DGP-001 result.** Confirm DGP-001 is `Executed`, verify the three production deployment receipts and
+1. **Reopen the DGP-001 result.** Confirm DGP-001 is `Executed`, verify the four production deployment receipts and
    code hashes, and run DGP-001's immediate verifier before any later authorized issuance changes its exact
    initial-state assertions. At the selected snapshot, run
    `bash script/check-deep-role-history.sh "$role_snapshot" post-activation`; this requires exactly the five original
-   DEEP role events, DGP-001's three atomic DEEP role events, and exactly one Factory role grant on each Controller,
+   DEEP role events, DGP-001's five atomic DEEP role events, and exactly one Factory role grant on each Controller,
    rejecting every unknown or temporary role assignment.
 2. **Run DGP-002's submission gates without broadcasting.** Call `validateSubmissionPreconditions()`. It requires the
    pinned DGP-001 proposal to be executed, the reviewed Controller/Factory/Router authority graph to remain intact,
@@ -70,7 +70,7 @@ or initial unlock. Because the Controller floors each call's 30/70 calculation i
 - Exactly three controller-created streams each contain `1,428,571.428571428571428571 DEEP`, with the Controller as
   sender, the Deepstate Inc Safe as owner and recipient, DEEP as the asset, a 365-day linear duration, zero cliff,
   one-second granularity, and both cancellation and transfer disabled.
-- The Minter Controller finishes with zero DEEP and zero Sablier allowance.
+- The Minter Controller finishes with zero Sablier allowance; unsolicited DEEP transfers do not affect execution.
 - A replay attempt fails because the Governor proposal is already `Executed`.
 
 DGP-002 intentionally also requires DGP-001's delegated authority and active NVDA Rewarder V2 state to remain intact.

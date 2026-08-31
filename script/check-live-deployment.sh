@@ -327,10 +327,13 @@ if ! decimal_greater_than_or_equal "$maximum_supply_with_minimum_headroom" "$dee
         "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" >&2
     exit 1
 fi
-if ! decimal_greater_than_or_equal \
-    "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"; then
-    printf 'Minter gross issuance cap %s is below required activation issuance %s\n' \
-        "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" >&2
+maximum_gross_baseline_with_minimum_headroom="$(
+    decimal_subtract "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"
+)"
+if ! decimal_greater_than_or_equal "$maximum_gross_baseline_with_minimum_headroom" "$deep_total_supply"; then
+    printf 'DEEP supply leaves less than the required %s base-unit activation gross headroom: supply %s, cap %s\n' \
+        "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" "$deep_total_supply" \
+        "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" >&2
     exit 1
 fi
 

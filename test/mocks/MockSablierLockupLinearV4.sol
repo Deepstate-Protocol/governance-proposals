@@ -34,6 +34,7 @@ contract MockSablierLockupLinearV4 is ISablierLockupLinearV4 {
     mapping(uint256 streamId => Stream stream) private _streams;
 
     error CreateReverted();
+    error ShapeExceeds32Bytes(uint256 length);
 
     function setRevertCreate(bool value) external {
         revertCreate = value;
@@ -55,6 +56,8 @@ contract MockSablierLockupLinearV4 is ISablierLockupLinearV4 {
         LockupLinear.Durations calldata durations
     ) external payable returns (uint256 streamId) {
         if (revertCreate) revert CreateReverted();
+        uint256 shapeLength = bytes(params.shape).length;
+        if (shapeLength > 32) revert ShapeExceeds32Bytes(shapeLength);
 
         address target = reentryTarget;
         if (target != address(0)) {

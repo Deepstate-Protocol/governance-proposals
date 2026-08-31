@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {DeepstateProposalScript} from "../../DeepstateProposalScript.s.sol";
 import {DeepstateAddresses} from "../../config/DeepstateAddresses.sol";
+import {DGP001Bootstrap} from "../../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../../src/DeepstateRewarderFactory.sol";
 import {DeepstateRewarderV2} from "../../../src/DeepstateRewarderV2.sol";
@@ -77,9 +78,10 @@ interface ISafeDGP001View {
 contract DeployDGP001 is DeepstateProposalScript {
     address internal constant PROPOSER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
     uint256 internal constant EXPECTED_PROPOSAL_ID =
-        43_515_582_931_149_866_007_777_378_018_087_004_156_505_872_239_108_242_112_228_969_517_517_916_946_941;
+        104_314_577_693_082_885_786_109_683_732_203_114_255_408_942_832_054_564_539_957_851_903_575_470_305_161;
 
-    uint256 private constant _ACTION_COUNT = 8;
+    uint256 private constant _ACTION_COUNT = 10;
+    bytes32 private constant _TOKEN_MINTER_ROLE = keccak256("MINTER_ROLE");
     uint256 private constant _FACTORY_MINTER_ROLE = 1;
     uint256 private constant _FACTORY_HOOK_MANAGER_ROLE = 1;
     uint256 private constant _MARKET_FUNDING = 100_000_000e18;
@@ -138,28 +140,35 @@ contract DeployDGP001 is DeepstateProposalScript {
         calldatas = new bytes[](_ACTION_COUNT);
 
         targets[0] = DeepstateAddresses.DEEP;
-        calldatas[0] = abi.encodeCall(IAccessControl.grantRole, (bytes32(0), DeepstateAddresses.MINTER_CONTROLLER));
+        calldatas[0] =
+            abi.encodeCall(IAccessControl.grantRole, (_TOKEN_MINTER_ROLE, DeepstateAddresses.DGP001_BOOTSTRAP));
 
-        targets[1] = DeepstateAddresses.DEEP;
-        calldatas[1] = abi.encodeCall(IAccessControl.renounceRole, (bytes32(0), DeepstateAddresses.GOVERNOR));
+        targets[1] = DeepstateAddresses.DGP001_BOOTSTRAP;
+        calldatas[1] = abi.encodeCall(DGP001Bootstrap.execute, ());
 
-        targets[2] = DeepstateAddresses.MINTER_CONTROLLER;
-        calldatas[2] = abi.encodeCall(DeepstateMinterController.lockTokenAdministration, ());
+        targets[2] = DeepstateAddresses.DEEP;
+        calldatas[2] = abi.encodeCall(IAccessControl.grantRole, (bytes32(0), DeepstateAddresses.MINTER_CONTROLLER));
 
-        targets[3] = DeepstateAddresses.MINTER_CONTROLLER;
-        calldatas[3] = abi.encodeCall(
+        targets[3] = DeepstateAddresses.DEEP;
+        calldatas[3] = abi.encodeCall(IAccessControl.renounceRole, (bytes32(0), DeepstateAddresses.GOVERNOR));
+
+        targets[4] = DeepstateAddresses.MINTER_CONTROLLER;
+        calldatas[4] = abi.encodeCall(DeepstateMinterController.activateTokenAdministration, ());
+
+        targets[5] = DeepstateAddresses.MINTER_CONTROLLER;
+        calldatas[5] = abi.encodeCall(
             IDeepstateRoleAdminDGP001.grantRoles, (DeepstateAddresses.REWARDER_FACTORY, _FACTORY_MINTER_ROLE)
         );
 
-        targets[4] = DeepstateAddresses.ROUTER;
-        calldatas[4] = abi.encodeCall(IDeepstateV1.transferOwnership, (DeepstateAddresses.V1_CONTROLLER));
+        targets[6] = DeepstateAddresses.ROUTER;
+        calldatas[6] = abi.encodeCall(IDeepstateV1.transferOwnership, (DeepstateAddresses.V1_CONTROLLER));
 
-        targets[5] = DeepstateAddresses.V1_CONTROLLER;
-        calldatas[5] = abi.encodeCall(
+        targets[7] = DeepstateAddresses.V1_CONTROLLER;
+        calldatas[7] = abi.encodeCall(
             IDeepstateRoleAdminDGP001.grantRoles, (DeepstateAddresses.REWARDER_FACTORY, _FACTORY_HOOK_MANAGER_ROLE)
         );
 
-        targets[6] = DeepstateAddresses.REWARDER_FACTORY;
+        targets[8] = DeepstateAddresses.REWARDER_FACTORY;
         DeepstateRewarderFactory.MarketConfig memory market = DeepstateRewarderFactory.MarketConfig({
             stockToken: DeepstateAddresses.NVDA,
             stockStartQuantity: _NVDA_START_QUANTITY,
@@ -167,155 +176,182 @@ contract DeployDGP001 is DeepstateProposalScript {
             stockBuySideActive: true,
             usdGBuySideActive: true
         });
-        calldatas[6] = abi.encodeCall(DeepstateRewarderFactory.migrateMarket, (market, DeepstateAddresses.REWARDER));
+        calldatas[8] = abi.encodeCall(DeepstateRewarderFactory.migrateMarket, (market, DeepstateAddresses.REWARDER));
 
-        targets[7] = DeepstateAddresses.REWARDER_FACTORY;
-        calldatas[7] = abi.encodeCall(DeepstateRewarderFactory.setOperator, (DeepstateAddresses.DEEPSTATE_INC_SAFE));
+        targets[9] = DeepstateAddresses.REWARDER_FACTORY;
+        calldatas[9] = abi.encodeCall(DeepstateRewarderFactory.setOperator, (DeepstateAddresses.DEEPSTATE_INC_SAFE));
 
         description = vm.readFile("proposals/DGP-001.md");
     }
 
     function _afterExecution() internal view override {
         DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
+        DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
         DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
         DeepstateV1Controller v1Controller = DeepstateV1Controller(DeepstateAddresses.V1_CONTROLLER);
         DeepstateRewarderFactory factory = DeepstateRewarderFactory(DeepstateAddresses.REWARDER_FACTORY);
         IDeepstateV1DGP001View router = IDeepstateV1DGP001View(DeepstateAddresses.ROUTER);
+        IDeepstateLegacyRewarder legacy = IDeepstateLegacyRewarder(DeepstateAddresses.REWARDER);
 
         _check(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 1);
-        _check(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 2);
-        _check(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 3);
-        _check(minter.owner() == DeepstateAddresses.GOVERNOR, 4);
-        _check(v1Controller.owner() == DeepstateAddresses.GOVERNOR, 5);
-        _check(factory.owner() == DeepstateAddresses.GOVERNOR, 6);
+        _check(DeepstateAddresses.DGP001_BOOTSTRAP.codehash == DeepstateAddresses.DGP001_BOOTSTRAP_CODEHASH, 2);
+        _check(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 3);
+        _check(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 4);
+        _check(minter.owner() == DeepstateAddresses.GOVERNOR, 5);
+        _check(bootstrap.governor() == DeepstateAddresses.GOVERNOR, 6);
+        _check(v1Controller.owner() == DeepstateAddresses.GOVERNOR, 7);
+        _check(factory.owner() == DeepstateAddresses.GOVERNOR, 8);
 
         bytes32 defaultAdminRole = deep.DEFAULT_ADMIN_ROLE();
         bytes32 tokenMinterRole = deep.MINTER_ROLE();
-        _check(deep.defaultAdminCount() == 1, 7);
-        _check(deep.hasRole(defaultAdminRole, DeepstateAddresses.MINTER_CONTROLLER), 8);
-        _check(!deep.hasRole(defaultAdminRole, DeepstateAddresses.GOVERNOR), 9);
-        _check(!deep.hasRole(defaultAdminRole, DeepstateAddresses.REWARDER_FACTORY), 10);
-        _check(deep.hasRole(tokenMinterRole, DeepstateAddresses.MINTER_CONTROLLER), 11);
-        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.GOVERNOR), 12);
-        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER_FACTORY), 13);
+        _check(deep.defaultAdminCount() == 1, 9);
+        _check(deep.hasRole(defaultAdminRole, DeepstateAddresses.MINTER_CONTROLLER), 10);
+        _check(!deep.hasRole(defaultAdminRole, DeepstateAddresses.GOVERNOR), 11);
+        _check(!deep.hasRole(defaultAdminRole, DeepstateAddresses.DGP001_BOOTSTRAP), 12);
+        _check(!deep.hasRole(defaultAdminRole, DeepstateAddresses.REWARDER_FACTORY), 13);
+        _check(deep.hasRole(tokenMinterRole, DeepstateAddresses.MINTER_CONTROLLER), 14);
+        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.GOVERNOR), 15);
+        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.DGP001_BOOTSTRAP), 16);
+        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER_FACTORY), 17);
+        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.DEEPSTATE_INC_SAFE), 18);
+        _check(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER), 19);
 
-        _check(address(minter.deepstateToken()) == DeepstateAddresses.DEEP, 14);
-        _check(address(minter.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 15);
-        _check(address(minter.legacyRewarder()) == DeepstateAddresses.REWARDER, 16);
-        _check(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 17);
-        _check(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 18);
-        _check(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 19);
-        _check(minter.legacyEndowmentCreated(), 20);
+        _check(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 20);
+        _check(address(bootstrap.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 21);
+        _check(address(bootstrap.legacyRewarder()) == DeepstateAddresses.REWARDER, 22);
+        _check(address(bootstrap.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 23);
+        _check(bootstrap.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 24);
+        _check(bootstrap.ENDOWMENT_PERCENT() == 30, 25);
+        _check(bootstrap.VESTING_DURATION() == 365 days, 26);
+        _check(bootstrap.STREAM_GRANULARITY() == 1 seconds, 27);
+        _check(bootstrap.executed(), 28);
+        _check(bootstrap.snapshotBlock() != 0 && bootstrap.snapshotBlock() <= block.number, 29);
+        uint40 snapshotAt = bootstrap.snapshotAt();
+        _check(snapshotAt != 0 && snapshotAt <= block.timestamp, 30);
+        _check(bootstrap.snapshotToken0() == DeepstateAddresses.USDG, 31);
+        _check(bootstrap.snapshotToken1() == DeepstateAddresses.NVDA, 32);
+        _check(bootstrap.token0Accrued() == legacy.totalAccrued(DeepstateAddresses.USDG), 33);
+        _check(bootstrap.token1Accrued() == legacy.totalAccrued(DeepstateAddresses.NVDA), 34);
+        uint256 expectedTotalAccrued = uint256(bootstrap.token0Accrued()) + uint256(bootstrap.token1Accrued());
+        uint256 expectedEndowment = expectedTotalAccrued * bootstrap.ENDOWMENT_PERCENT() / 100;
+        _check(bootstrap.totalAccrued() == expectedTotalAccrued, 35);
+        _check(bootstrap.endowmentAmount() == expectedEndowment && expectedEndowment != 0, 36);
+        _check(deep.totalSupply() == bootstrap.postEndowmentSupply() + _MARKET_FUNDING + _MARKET_VESTING, 37);
 
-        uint40 snapshotAt = minter.legacyEndowmentSnapshotAt();
-        _check(snapshotAt != 0, 21);
-        _check(minter.tokenAdministrationEndsAt() == snapshotAt + minter.TOKEN_ADMINISTRATION_DURATION(), 22);
-        uint256 expectedEndowment =
-            (uint256(minter.legacyToken0Accrued()) + uint256(minter.legacyToken1Accrued())) * 30 / 100;
-        _check(minter.legacyEndowmentAmount() == expectedEndowment, 23);
-        _check(minter.grossIssued() == expectedEndowment + _MARKET_FUNDING + _MARKET_VESTING, 24);
-        _check(deep.totalSupply() <= minter.mintCap(), 25);
-        _check(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_MINTER_ROLE, 26);
-        _check(minter.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 27);
+        _check(address(minter.deepstateToken()) == DeepstateAddresses.DEEP, 38);
+        _check(address(minter.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 39);
+        _check(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 40);
+        _check(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 41);
+        _check(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 42);
+        _check(minter.tokenAdministrationEndsAt() == snapshotAt + minter.TOKEN_ADMINISTRATION_DURATION(), 43);
+        _check(minter.grossIssued() == deep.totalSupply(), 44);
+        _check(deep.totalSupply() <= minter.mintCap(), 45);
+        _check(minter.grossIssued() <= minter.grossIssuanceCap(), 46);
+        _check(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_MINTER_ROLE, 47);
+        _check(minter.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 48);
 
-        _check(address(v1Controller.deepstate()) == DeepstateAddresses.ROUTER, 28);
-        _check(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_HOOK_MANAGER_ROLE, 29);
-        _check(v1Controller.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 30);
-        _check(router.owner() == DeepstateAddresses.V1_CONTROLLER, 31);
+        _check(address(v1Controller.deepstate()) == DeepstateAddresses.ROUTER, 49);
+        _check(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == _FACTORY_HOOK_MANAGER_ROLE, 50);
+        _check(v1Controller.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 51);
+        _check(router.owner() == DeepstateAddresses.V1_CONTROLLER, 52);
         (address feeRecipient, uint16 feeBps) = router.feeConfig();
-        _check(feeRecipient == DeepstateAddresses.STATE, 32);
-        _check(feeBps == DeepstateAddresses.ROUTER_FEE_BPS, 33);
+        _check(feeRecipient == DeepstateAddresses.STATE, 53);
+        _check(feeBps == DeepstateAddresses.ROUTER_FEE_BPS, 54);
 
-        _check(factory.operator() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 34);
-        _check(address(factory.deepstateV1Controller()) == DeepstateAddresses.V1_CONTROLLER, 35);
-        _check(address(factory.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 36);
-        _check(address(factory.deepstate()) == DeepstateAddresses.ROUTER, 37);
-        _check(address(factory.rewardToken()) == DeepstateAddresses.DEEP, 38);
-        _check(factory.usdG() == DeepstateAddresses.USDG, 39);
-        _check(factory.fundingBudget() == DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET, 40);
-        _check(factory.fundingCommitted() == _MARKET_FUNDING, 41);
-        _check(factory.nextDeploymentAt() == uint256(snapshotAt) + factory.DEPLOYMENT_COOLDOWN(), 42);
-        _check(factory.marketDeployed(DeepstateAddresses.NVDA_USDG_POOL_ID), 43);
+        _check(factory.operator() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 55);
+        _check(address(factory.deepstateV1Controller()) == DeepstateAddresses.V1_CONTROLLER, 56);
+        _check(address(factory.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 57);
+        _check(address(factory.deepstate()) == DeepstateAddresses.ROUTER, 58);
+        _check(address(factory.rewardToken()) == DeepstateAddresses.DEEP, 59);
+        _check(factory.usdG() == DeepstateAddresses.USDG, 60);
+        _check(factory.fundingBudget() == DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET, 61);
+        _check(factory.fundingCommitted() == _MARKET_FUNDING, 62);
+        _check(factory.nextDeploymentAt() == uint256(snapshotAt) + factory.DEPLOYMENT_COOLDOWN(), 63);
+        _check(factory.marketDeployed(DeepstateAddresses.NVDA_USDG_POOL_ID), 64);
 
         address rewarderAddress = factory.activeRewarder(DeepstateAddresses.NVDA_USDG_POOL_ID);
-        _check(rewarderAddress != address(0), 44);
-        _check(factory.rewarderPool(rewarderAddress) == DeepstateAddresses.NVDA_USDG_POOL_ID, 45);
-        _check(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID) == rewarderAddress, 46);
+        _check(rewarderAddress != address(0), 65);
+        _check(factory.rewarderPool(rewarderAddress) == DeepstateAddresses.NVDA_USDG_POOL_ID, 66);
+        _check(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID) == rewarderAddress, 67);
 
         DeepstateRewarderV2 rewarder = DeepstateRewarderV2(rewarderAddress);
-        _check(rewarder.owner() == DeepstateAddresses.REWARDER_FACTORY, 47);
-        _check(!rewarder.retired(), 48);
-        _check(rewarder.deepstate() == DeepstateAddresses.ROUTER, 49);
-        _check(rewarder.rewardToken() == DeepstateAddresses.DEEP, 50);
-        _check(rewarder.poolId() == DeepstateAddresses.NVDA_USDG_POOL_ID, 51);
-        _check(rewarder.token0() == DeepstateAddresses.USDG, 52);
-        _check(rewarder.token1() == DeepstateAddresses.NVDA, 53);
-        _check(rewarder.sideEmissionCap() == factory.SIDE_EMISSION_CAP(), 54);
-        _check(rewarder.emissionDuration() == 365 days, 55);
-        _check(rewarder.token0StartQuantity() == factory.USDG_START_QUANTITY(), 56);
-        _check(rewarder.token0MaxQuantity() == factory.USDG_MAX_QUANTITY(), 57);
-        _check(rewarder.token1StartQuantity() == _NVDA_START_QUANTITY, 58);
-        _check(rewarder.token1MaxQuantity() == _NVDA_MAX_QUANTITY, 59);
-        _check(deep.balanceOf(rewarderAddress) == _MARKET_FUNDING, 60);
+        _check(rewarder.owner() == DeepstateAddresses.REWARDER_FACTORY, 68);
+        _check(!rewarder.retired(), 69);
+        _check(rewarder.deepstate() == DeepstateAddresses.ROUTER, 70);
+        _check(rewarder.rewardToken() == DeepstateAddresses.DEEP, 71);
+        _check(rewarder.poolId() == DeepstateAddresses.NVDA_USDG_POOL_ID, 72);
+        _check(rewarder.token0() == DeepstateAddresses.USDG, 73);
+        _check(rewarder.token1() == DeepstateAddresses.NVDA, 74);
+        _check(rewarder.sideEmissionCap() == factory.SIDE_EMISSION_CAP(), 75);
+        _check(rewarder.emissionDuration() == 365 days, 76);
+        _check(rewarder.token0StartQuantity() == factory.USDG_START_QUANTITY(), 77);
+        _check(rewarder.token0MaxQuantity() == factory.USDG_MAX_QUANTITY(), 78);
+        _check(rewarder.token1StartQuantity() == _NVDA_START_QUANTITY, 79);
+        _check(rewarder.token1MaxQuantity() == _NVDA_MAX_QUANTITY, 80);
+        // The CREATE child address is predictable and may hold unsolicited DEEP before deployment. Factory accounting
+        // and the Controller's issuance receipt prove the exact 100 million mint; extra balance cannot increase caps.
+        _check(deep.balanceOf(rewarderAddress) >= _MARKET_FUNDING, 81);
 
-        IDeepstateLegacyRewarder legacy = IDeepstateLegacyRewarder(DeepstateAddresses.REWARDER);
-        _check(legacy.poolId() == DeepstateAddresses.NVDA_USDG_POOL_ID, 61);
-        _check(legacy.deepstate() == DeepstateAddresses.ROUTER, 62);
-        _check(legacy.rewardToken() == DeepstateAddresses.DEEP, 63);
+        _check(legacy.poolId() == DeepstateAddresses.NVDA_USDG_POOL_ID, 82);
+        _check(legacy.deepstate() == DeepstateAddresses.ROUTER, 83);
+        _check(legacy.rewardToken() == DeepstateAddresses.DEEP, 84);
 
-        uint256 endowmentStreamId = minter.legacyEndowmentStreamId();
-        _check(endowmentStreamId != 0, 64);
+        uint256 endowmentStreamId = bootstrap.streamId();
+        _check(endowmentStreamId != 0, 85);
         ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
-        _checkStream(lockup, endowmentStreamId, expectedEndowment, snapshotAt, 65);
-        _checkStream(lockup, endowmentStreamId + 1, _MARKET_VESTING, snapshotAt, 76);
-        _check(lockup.nextStreamId() > endowmentStreamId + 1, 87);
-        _check(deep.balanceOf(DeepstateAddresses.MINTER_CONTROLLER) == 0, 88);
-        _check(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 89);
+        _checkStream(
+            lockup, endowmentStreamId, expectedEndowment, snapshotAt, DeepstateAddresses.DGP001_BOOTSTRAP, 1, 86
+        );
+        _checkStream(
+            lockup, endowmentStreamId + 1, _MARKET_VESTING, snapshotAt, DeepstateAddresses.MINTER_CONTROLLER, 1, 97
+        );
+        _check(lockup.nextStreamId() > endowmentStreamId + 1, 108);
+        _check(deep.allowance(DeepstateAddresses.DGP001_BOOTSTRAP, DeepstateAddresses.SABLIER_LOCKUP) == 0, 110);
+        _check(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 112);
 
-        _check(DeepstateAddresses.DEEP.codehash == DeepstateAddresses.DEEP_CODEHASH, 90);
-        _check(DeepstateAddresses.ROUTER.codehash == DeepstateAddresses.ROUTER_CODEHASH, 91);
-        _check(DeepstateAddresses.REWARDER.codehash == DeepstateAddresses.REWARDER_CODEHASH, 92);
-        _check(DeepstateAddresses.USDG.codehash == DeepstateAddresses.USDG_CODEHASH, 93);
-        _check(DeepstateAddresses.NVDA.codehash == DeepstateAddresses.NVDA_CODEHASH, 94);
-        _check(DeepstateAddresses.SABLIER_LOCKUP.codehash == DeepstateAddresses.SABLIER_LOCKUP_CODEHASH, 95);
-        _check(DeepstateAddresses.SABLIER_COMPTROLLER.codehash == DeepstateAddresses.SABLIER_COMPTROLLER_CODEHASH, 96);
-        _check(DeepstateAddresses.DEEPSTATE_INC_SAFE.codehash == DeepstateAddresses.DEEPSTATE_INC_SAFE_CODEHASH, 97);
-        _check(lockup.comptroller() == DeepstateAddresses.SABLIER_COMPTROLLER, 98);
-        _check(lockup.nativeToken() != DeepstateAddresses.DEEP, 99);
-        _check(minter.legacyToken0Accrued() == legacy.totalAccrued(DeepstateAddresses.USDG), 100);
-        _check(minter.legacyToken1Accrued() == legacy.totalAccrued(DeepstateAddresses.NVDA), 101);
-        _check(DeepstateAddresses.USDG_IMPLEMENTATION.codehash == DeepstateAddresses.USDG_IMPLEMENTATION_CODEHASH, 102);
-        _check(DeepstateAddresses.NVDA_BEACON.codehash == DeepstateAddresses.NVDA_BEACON_CODEHASH, 103);
-        _check(DeepstateAddresses.NVDA_IMPLEMENTATION.codehash == DeepstateAddresses.NVDA_IMPLEMENTATION_CODEHASH, 104);
+        _check(DeepstateAddresses.DEEP.codehash == DeepstateAddresses.DEEP_CODEHASH, 113);
+        _check(DeepstateAddresses.ROUTER.codehash == DeepstateAddresses.ROUTER_CODEHASH, 114);
+        _check(DeepstateAddresses.REWARDER.codehash == DeepstateAddresses.REWARDER_CODEHASH, 115);
+        _check(DeepstateAddresses.USDG.codehash == DeepstateAddresses.USDG_CODEHASH, 116);
+        _check(DeepstateAddresses.NVDA.codehash == DeepstateAddresses.NVDA_CODEHASH, 117);
+        _check(DeepstateAddresses.SABLIER_LOCKUP.codehash == DeepstateAddresses.SABLIER_LOCKUP_CODEHASH, 118);
+        _check(DeepstateAddresses.SABLIER_COMPTROLLER.codehash == DeepstateAddresses.SABLIER_COMPTROLLER_CODEHASH, 119);
+        _check(DeepstateAddresses.DEEPSTATE_INC_SAFE.codehash == DeepstateAddresses.DEEPSTATE_INC_SAFE_CODEHASH, 120);
+        _check(lockup.comptroller() == DeepstateAddresses.SABLIER_COMPTROLLER, 121);
+        _check(lockup.nativeToken() != DeepstateAddresses.DEEP, 122);
+        _check(DeepstateAddresses.USDG_IMPLEMENTATION.codehash == DeepstateAddresses.USDG_IMPLEMENTATION_CODEHASH, 123);
+        _check(DeepstateAddresses.NVDA_BEACON.codehash == DeepstateAddresses.NVDA_BEACON_CODEHASH, 124);
+        _check(DeepstateAddresses.NVDA_IMPLEMENTATION.codehash == DeepstateAddresses.NVDA_IMPLEMENTATION_CODEHASH, 125);
         _check(
             DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION.codehash
                 == DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH,
-            105
+            126
         );
         _check(
             DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON.codehash
                 == DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON_CODEHASH,
-            106
+            127
         );
-        _check(_implementationOf(DeepstateAddresses.USDG) == DeepstateAddresses.USDG_IMPLEMENTATION, 107);
+        _check(_implementationOf(DeepstateAddresses.USDG) == DeepstateAddresses.USDG_IMPLEMENTATION, 128);
         _check(
             IUpgradeableBeaconDGP001View(DeepstateAddresses.NVDA_BEACON).implementation()
                 == DeepstateAddresses.NVDA_IMPLEMENTATION,
-            108
+            129
         );
         _check(
             _implementationOf(DeepstateAddresses.SABLIER_COMPTROLLER)
                 == DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION,
-            109
+            130
         );
-        _check(_safeSingleton() == DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON, 110);
-        _checkSablierComptroller(111, false);
-        _checkSafe(117, false);
-        _check(_beaconOf(DeepstateAddresses.NVDA) == DeepstateAddresses.NVDA_BEACON, 123);
+        _check(_safeSingleton() == DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON, 131);
+        _checkSablierComptroller(132, false);
+        _checkSafe(138, false);
+        _check(_beaconOf(DeepstateAddresses.NVDA) == DeepstateAddresses.NVDA_BEACON, 144);
     }
 
     function _validateActivationPreconditions(bool requireIdleMarket) private view {
         DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
+        DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
         DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
         DeepstateV1Controller v1Controller = DeepstateV1Controller(DeepstateAddresses.V1_CONTROLLER);
         DeepstateRewarderFactory factory = DeepstateRewarderFactory(DeepstateAddresses.REWARDER_FACTORY);
@@ -324,8 +360,9 @@ contract DeployDGP001 is DeepstateProposalScript {
         ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
 
         _pre(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 1);
-        _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 2);
-        _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 3);
+        _pre(DeepstateAddresses.DGP001_BOOTSTRAP.codehash == DeepstateAddresses.DGP001_BOOTSTRAP_CODEHASH, 2);
+        _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 3);
+        _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 110);
         _pre(DeepstateAddresses.DEEP.codehash == DeepstateAddresses.DEEP_CODEHASH, 4);
         _pre(DeepstateAddresses.ROUTER.codehash == DeepstateAddresses.ROUTER_CODEHASH, 5);
         _pre(DeepstateAddresses.REWARDER.codehash == DeepstateAddresses.REWARDER_CODEHASH, 6);
@@ -350,24 +387,39 @@ contract DeployDGP001 is DeepstateProposalScript {
         _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER_FACTORY), 21);
         _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.DEEPSTATE_INC_SAFE), 22);
         _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.REWARDER), 23);
+        _pre(!deep.hasRole(tokenMinterRole, DeepstateAddresses.DGP001_BOOTSTRAP), 111);
+        _pre(!deep.hasRole(defaultAdminRole, DeepstateAddresses.DGP001_BOOTSTRAP), 112);
 
         _pre(address(minter.deepstateToken()) == DeepstateAddresses.DEEP, 24);
         _pre(address(minter.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 25);
-        _pre(address(minter.legacyRewarder()) == DeepstateAddresses.REWARDER, 26);
-        _pre(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 27);
-        _pre(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 28);
-        _pre(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 29);
-        _pre(minter.grossIssued() == 0, 30);
-        _pre(!minter.legacyEndowmentCreated(), 31);
-        _pre(minter.legacyEndowmentSnapshotBlock() == 0, 32);
-        _pre(minter.legacyEndowmentSnapshotAt() == 0, 33);
-        _pre(minter.legacyToken0Accrued() == 0, 34);
-        _pre(minter.legacyToken1Accrued() == 0, 35);
-        _pre(minter.legacyEndowmentAmount() == 0, 36);
-        _pre(minter.legacyEndowmentStreamId() == 0, 37);
-        _pre(minter.tokenAdministrationEndsAt() == 0, 38);
-        _pre(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == 0, 39);
-        _pre(minter.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 40);
+        _pre(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 26);
+        _pre(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 27);
+        _pre(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 28);
+        _pre(minter.grossIssued() == 0, 29);
+        _pre(minter.tokenAdministrationEndsAt() == 0, 30);
+        _pre(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == 0, 31);
+        _pre(minter.rolesOf(DeepstateAddresses.DEEPSTATE_INC_SAFE) == 0, 32);
+
+        _pre(bootstrap.governor() == DeepstateAddresses.GOVERNOR, 113);
+        _pre(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 114);
+        _pre(address(bootstrap.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 115);
+        _pre(address(bootstrap.legacyRewarder()) == DeepstateAddresses.REWARDER, 116);
+        _pre(address(bootstrap.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 117);
+        _pre(bootstrap.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 118);
+        _pre(bootstrap.ENDOWMENT_PERCENT() == 30, 119);
+        _pre(bootstrap.VESTING_DURATION() == 365 days, 120);
+        _pre(bootstrap.STREAM_GRANULARITY() == 1 seconds, 121);
+        _pre(!bootstrap.executed(), 122);
+        _pre(bootstrap.snapshotBlock() == 0, 123);
+        _pre(bootstrap.snapshotAt() == 0, 124);
+        _pre(bootstrap.snapshotToken0() == address(0) && bootstrap.snapshotToken1() == address(0), 125);
+        _pre(bootstrap.token0Accrued() == 0 && bootstrap.token1Accrued() == 0, 126);
+        _pre(bootstrap.totalAccrued() == 0, 127);
+        _pre(bootstrap.endowmentAmount() == 0, 128);
+        _pre(bootstrap.preexistingBalanceBurned() == 0, 134);
+        _pre(bootstrap.postEndowmentSupply() == 0, 129);
+        _pre(bootstrap.streamId() == 0, 130);
+        _pre(deep.allowance(DeepstateAddresses.DGP001_BOOTSTRAP, DeepstateAddresses.SABLIER_LOCKUP) == 0, 132);
 
         _pre(address(v1Controller.deepstate()) == DeepstateAddresses.ROUTER, 41);
         _pre(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY) == 0, 42);
@@ -430,6 +482,7 @@ contract DeployDGP001 is DeepstateProposalScript {
         _pre(minter.mintCap() >= activationIssuance, 83);
         _pre(deep.totalSupply() <= minter.mintCap() - activationIssuance, 84);
         _pre(minter.grossIssuanceCap() >= activationIssuance, 85);
+        _pre(deep.totalSupply() <= minter.grossIssuanceCap() - activationIssuance, 133);
 
         _pre(lockup.comptroller() == DeepstateAddresses.SABLIER_COMPTROLLER, 86);
         _pre(lockup.nativeToken() != DeepstateAddresses.DEEP, 87);
@@ -529,11 +582,13 @@ contract DeployDGP001 is DeepstateProposalScript {
         uint256 streamId,
         uint256 amount,
         uint40 expectedStart,
+        address expectedSender,
+        uint40 expectedGranularity,
         uint256 conditionOffset
     ) private view {
         _check(lockup.ownerOf(streamId) == DeepstateAddresses.DEEPSTATE_INC_SAFE, conditionOffset);
         _check(lockup.getRecipient(streamId) == DeepstateAddresses.DEEPSTATE_INC_SAFE, conditionOffset + 1);
-        _check(lockup.getSender(streamId) == DeepstateAddresses.MINTER_CONTROLLER, conditionOffset + 2);
+        _check(lockup.getSender(streamId) == expectedSender, conditionOffset + 2);
         _check(address(lockup.getUnderlyingToken(streamId)) == DeepstateAddresses.DEEP, conditionOffset + 3);
         _check(lockup.getDepositedAmount(streamId) == amount, conditionOffset + 4);
         _check(lockup.getStartTime(streamId) == expectedStart, conditionOffset + 5);
@@ -541,7 +596,7 @@ contract DeployDGP001 is DeepstateProposalScript {
         _check(lockup.getCliffTime(streamId) == 0, conditionOffset + 7);
         _check(!lockup.isCancelable(streamId), conditionOffset + 8);
         _check(!lockup.isTransferable(streamId), conditionOffset + 9);
-        _check(lockup.getGranularity(streamId) == 1, conditionOffset + 10);
+        _check(lockup.getGranularity(streamId) == expectedGranularity, conditionOffset + 10);
     }
 
     function _check(bool condition, uint256 conditionNumber) private pure {

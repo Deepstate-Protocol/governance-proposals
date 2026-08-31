@@ -199,24 +199,15 @@ contract DeepstateFactorySystemHandler is Test {
         legacyRewarder.setTotalAccrued(legacyToken0, 4);
         deepstate.setPoolHookConfig(legacyToken0, legacyToken1, address(legacyRewarder), true, true);
         minterController = new DeepstateMinterController(
-            address(this),
-            address(deep),
-            address(sablier),
-            address(legacyRewarder),
-            VESTING_RECIPIENT,
-            MINT_CAP,
-            GROSS_ISSUANCE_CAP
+            address(this), address(deep), address(sablier), VESTING_RECIPIENT, MINT_CAP, GROSS_ISSUANCE_CAP
         );
         factory = new DeepstateRewarderFactory(
             address(this), address(v1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
 
-        deep.grantRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
-        totalVestingMinted = minterController.legacyEndowmentAmount();
-        successfulMintCalls = 1;
+        minterController.activateTokenAdministration();
         deepstate.setPoolHookConfig(legacyToken0, legacyToken1, address(0), false, false);
 
         deepstate.transferOwnership(address(v1Controller));
@@ -1184,10 +1175,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.successfulDeployments(), 2);
         assertNotEq(handler.factory().activeRewarder(nextPoolId), address(0));
         assertEq(handler.factoryStreamCount(), 2);
-        assertEq(
-            handler.deep().balanceOf(address(handler.sablier())),
-            handler.minterController().legacyEndowmentAmount() + 2 * (uint256(100_000_000e18) * 30 / 70)
-        );
+        assertEq(handler.deep().balanceOf(address(handler.sablier())), 2 * (uint256(100_000_000e18) * 30 / 70));
         assertEq(
             handler.factory().activeRewarder(_poolId(firstStock, address(handler.usdG()))),
             handler.modelRewarder(firstStock)
@@ -1326,7 +1314,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(expired.successfulDeployments(), 0);
         assertEq(expired.deep().totalSupply(), expiredSupply);
         assertEq(expired.factory().fundingCommitted(), 0);
-        assertEq(expired.sablier().nextStreamId(), 2);
+        assertEq(expired.sablier().nextStreamId(), 1);
     }
 
     function test_Reachability_ProductionBudgetIsLifetimeAndRetirementDoesNotRestoreIt() public {
@@ -1355,7 +1343,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.factory().activeRewarder(nextPoolId), address(0));
         assertFalse(handler.factory().marketDeployed(nextPoolId));
         assertEq(handler.factoryStreamCount(), 1);
-        assertEq(handler.sablier().nextStreamId(), 3);
+        assertEq(handler.sablier().nextStreamId(), 2);
     }
 
     function _assertNoMarketDeployment(address stockToken, bytes32 poolId) private view {
@@ -1363,7 +1351,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.factory().fundingCommitted(), 0);
         assertEq(handler.factory().nextDeploymentAt(), 0);
         assertEq(handler.factoryStreamCount(), 0);
-        assertEq(handler.sablier().nextStreamId(), 2);
+        assertEq(handler.sablier().nextStreamId(), 1);
         if (poolId != bytes32(0)) {
             assertEq(handler.factory().activeRewarder(poolId), address(0));
             assertFalse(handler.factory().marketDeployed(poolId));

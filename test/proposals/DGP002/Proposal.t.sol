@@ -21,6 +21,7 @@ contract DGP002DeploymentHarness is DeployRewarderV2System {
         DeploymentPlan memory plan = _plan();
         _validateExistingDeployments(plan);
         _deployIfMissing(MINTER_SALT, plan.minterInitCode, plan.minterController);
+        _deployIfMissing(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCode, plan.dgp001Bootstrap);
         _deployIfMissing(V1_CONTROLLER_SALT, plan.v1InitCode, plan.v1Controller);
         _deployIfMissing(FACTORY_SALT, plan.factoryInitCode, plan.rewarderFactory);
         _validateExistingDeployments(plan);

@@ -7,6 +7,7 @@ import {ERC20} from "solady/tokens/ERC20.sol";
 
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
+import {DGP001Bootstrap} from "../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../src/DeepstateRewarderFactory.sol";
 import {DeepstateRewarderV2} from "../../src/DeepstateRewarderV2.sol";
@@ -103,6 +104,7 @@ contract DeepstateActivationConditionsHandler is Test {
     DeepstateToken public immutable deep;
     MockSablierLockupLinearV4 public immutable sablier;
     DeepstateV1 public immutable router;
+    DGP001Bootstrap public immutable bootstrap;
     DeepstateMinterController public immutable minterController;
     DeepstateV1Controller public immutable v1Controller;
     DeepstateRewarderFactory public immutable factory;
@@ -144,14 +146,9 @@ contract DeepstateActivationConditionsHandler is Test {
         deep.mint(address(legacyRewarder), EXISTING_REWARDER_ALLOCATION);
 
         minterController = new DeepstateMinterController(
-            address(this),
-            address(deep),
-            address(sablier),
-            address(legacyRewarder),
-            INC_SAFE,
-            LIVE_AND_GROSS_CAP,
-            LIVE_AND_GROSS_CAP
+            address(this), address(deep), address(sablier), INC_SAFE, LIVE_AND_GROSS_CAP, LIVE_AND_GROSS_CAP
         );
+        bootstrap = new DGP001Bootstrap(address(this), address(minterController), address(legacyRewarder));
         v1Controller = new DeepstateV1Controller(address(this), address(router));
         factory = new DeepstateRewarderFactory(
             address(this), address(v1Controller), address(minterController), address(usdG), FACTORY_FUNDING_BUDGET
@@ -251,14 +248,18 @@ contract DeepstateActivationConditionsHandler is Test {
         bytes32 tokenMinterRole = deep.MINTER_ROLE();
         deep.grantRole(tokenMinterRole, LEGACY_BYPASS_MINTER);
 
-        // Every bypass is removed before governance gives up administration. The controller self-grants its sole
-        // token-level minter role and creates the accrued-emissions endowment inside the atomic lock call.
+        // Model the verified pre-proposal baseline: no legacy token minters remain. The only additional token minter
+        // introduced by DGP-001 is the one-use Bootstrap, which renounces the role during `execute`.
         deep.revokeRole(tokenMinterRole, address(this));
         deep.revokeRole(tokenMinterRole, LEGACY_BYPASS_MINTER);
+        deep.grantRole(tokenMinterRole, address(bootstrap));
+        bootstrap.execute();
+        assertEq(bootstrap.endowmentAmount(), ENDOWMENT);
+        assertFalse(deep.hasRole(tokenMinterRole, address(bootstrap)));
+
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
-        assertEq(minterController.legacyEndowmentAmount(), ENDOWMENT);
+        minterController.activateTokenAdministration();
 
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
         router.transferOwnership(address(v1Controller));
@@ -364,13 +365,19 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         );
 
         MockSablierLockupLinearV4.Stream memory endowment = sablier.stream(1);
-        _assertLinearStream(endowment, address(minterController), handler.ENDOWMENT(), "Deepstate Inc endowment");
+        _assertLinearStream(endowment, address(handler.bootstrap()), handler.ENDOWMENT(), "Deepstate Inc endowment", 1);
         MockSablierLockupLinearV4.Stream memory marketVesting = sablier.stream(2);
-        _assertLinearStream(marketVesting, address(minterController), handler.MARKET_VESTING(), "Deepstate allocation");
+        _assertLinearStream(
+            marketVesting, address(minterController), handler.MARKET_VESTING(), "Deepstate allocation", 0
+        );
         for (uint256 streamId = 3; streamId <= 5; ++streamId) {
             MockSablierLockupLinearV4.Stream memory volunteerVesting = sablier.stream(streamId);
             _assertLinearStream(
-                volunteerVesting, address(minterController), handler.VOLUNTEER_STREAM_VESTING(), "Deepstate allocation"
+                volunteerVesting,
+                address(minterController),
+                handler.VOLUNTEER_STREAM_VESTING(),
+                "Deepstate allocation",
+                0
             );
         }
 
@@ -380,7 +387,9 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         assertEq(deep.balanceOf(address(handler.legacyRewarder())), handler.EXISTING_REWARDER_ALLOCATION());
         assertEq(deep.balanceOf(handler.rewarderV2()), handler.MARKET_PRIMARY());
         assertEq(deep.balanceOf(address(handler)), 0);
+        assertEq(deep.balanceOf(address(handler.bootstrap())), 0);
         assertEq(deep.balanceOf(address(minterController)), 0);
+        assertEq(deep.allowance(address(handler.bootstrap()), address(sablier)), 0);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
         assertEq(
             deep.balanceOf(address(sablier)),
@@ -389,14 +398,15 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         uint256 expectedSupply = handler.EXISTING_REWARDER_ALLOCATION() + handler.ENDOWMENT() + handler.MARKET_PRIMARY()
             + handler.MARKET_VESTING() + handler.VOLUNTEER_PRIMARY() + handler.VOLUNTEER_VESTING();
         assertEq(deep.totalSupply(), expectedSupply);
-        uint256 expectedGross = handler.ENDOWMENT() + handler.MARKET_PRIMARY() + handler.MARKET_VESTING()
-            + handler.VOLUNTEER_PRIMARY() + handler.VOLUNTEER_VESTING();
+        uint256 expectedGross = expectedSupply;
         assertEq(minterController.grossIssued(), expectedGross);
-        assertTrue(minterController.legacyEndowmentCreated());
-        assertEq(minterController.legacyToken0Accrued(), handler.LEGACY_TOKEN0_ACCRUED());
-        assertEq(minterController.legacyToken1Accrued(), handler.LEGACY_TOKEN1_ACCRUED());
-        assertEq(minterController.legacyEndowmentAmount(), handler.ENDOWMENT());
-        assertEq(minterController.legacyEndowmentStreamId(), 1);
+        DGP001Bootstrap bootstrap = handler.bootstrap();
+        assertTrue(bootstrap.executed());
+        assertEq(bootstrap.token0Accrued(), handler.LEGACY_TOKEN0_ACCRUED());
+        assertEq(bootstrap.token1Accrued(), handler.LEGACY_TOKEN1_ACCRUED());
+        assertEq(bootstrap.endowmentAmount(), handler.ENDOWMENT());
+        assertEq(bootstrap.streamId(), 1);
+        assertEq(bootstrap.postEndowmentSupply(), handler.EXISTING_REWARDER_ALLOCATION() + handler.ENDOWMENT());
         assertEq(minterController.mintCap() - deep.totalSupply(), handler.LIVE_AND_GROSS_CAP() - expectedSupply);
         assertEq(
             minterController.grossIssuanceCap() - minterController.grossIssued(),
@@ -415,6 +425,8 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(handler)));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(handler)));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(factory)));
+        assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(handler.bootstrap())));
+        assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(handler.bootstrap())));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), handler.LEGACY_BYPASS_MINTER()));
 
         assertEq(minterController.rolesOf(address(factory)), minterController.MINTER_ROLE());
@@ -507,7 +519,8 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         MockSablierLockupLinearV4.Stream memory stream,
         address expectedFunder,
         uint256 expectedAmount,
-        string memory expectedShape
+        string memory expectedShape,
+        uint40 expectedGranularity
     ) internal view {
         assertEq(stream.funder, expectedFunder);
         assertEq(stream.sender, expectedFunder);
@@ -519,7 +532,7 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         assertEq(keccak256(bytes(stream.shape)), keccak256(bytes(expectedShape)));
         assertEq(stream.startUnlockAmount, 0);
         assertEq(stream.cliffUnlockAmount, 0);
-        assertEq(stream.granularity, 0);
+        assertEq(stream.granularity, expectedGranularity);
         assertEq(stream.cliffDuration, 0);
         assertEq(stream.totalDuration, 365 days);
     }

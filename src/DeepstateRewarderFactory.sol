@@ -80,7 +80,7 @@ contract DeepstateRewarderFactory is Ownable, ReentrancyGuard {
     /// @notice True forever after this factory deploys the pool's sole rewarder.
     mapping(bytes32 poolId => bool deployed) public marketDeployed;
     event OperatorSet(address indexed previousOperator, address indexed newOperator);
-    event MarketDeployed(
+    event RewarderDeployed(
         bytes32 indexed poolId,
         address indexed rewarder,
         address token0,
@@ -88,9 +88,9 @@ contract DeepstateRewarderFactory is Ownable, ReentrancyGuard {
         bool token0Active,
         bool token1Active
     );
-    event MarketFullyFunded(bytes32 indexed poolId, address indexed rewarder, uint256 amount, uint256 streamId);
-    event MarketMigrated(bytes32 indexed poolId, address indexed previousHook, address indexed rewarder);
-    event MarketRemoved(bytes32 indexed poolId, address indexed rewarder);
+    event RewarderFunded(bytes32 indexed poolId, address indexed rewarder, uint256 rewardAmount);
+    event MarketRewarderReplaced(bytes32 indexed poolId, address indexed previousRewarder, address indexed newRewarder);
+    event MarketRewarderRemoved(bytes32 indexed poolId, address indexed rewarder);
 
     error InvalidOwner();
     error InvalidDeepstateV1Controller();
@@ -214,7 +214,7 @@ contract DeepstateRewarderFactory is Ownable, ReentrancyGuard {
         deepstateV1Controller.setPoolHookConfig(market.token0, market.token1, address(0), false, false);
         rewarder = _deployResolvedMarket(market);
 
-        emit MarketMigrated(market.poolId, expectedExistingHook, address(rewarder));
+        emit MarketRewarderReplaced(market.poolId, expectedExistingHook, address(rewarder));
     }
 
     function _deployResolvedMarket(ResolvedMarket memory market) private returns (DeepstateRewarderV2 rewarder) {
@@ -255,15 +255,15 @@ contract DeepstateRewarderFactory is Ownable, ReentrancyGuard {
         activeRewarder[market.poolId] = address(rewarder);
         rewarderPool[address(rewarder)] = market.poolId;
 
-        uint256 streamId = minterController.mint(address(rewarder), MARKET_FUNDING);
+        minterController.mint(address(rewarder), MARKET_FUNDING);
         deepstateV1Controller.setPoolHookConfig(
             market.token0, market.token1, address(rewarder), market.token0Active, market.token1Active
         );
 
-        emit MarketDeployed(
+        emit RewarderDeployed(
             market.poolId, address(rewarder), market.token0, market.token1, market.token0Active, market.token1Active
         );
-        emit MarketFullyFunded(market.poolId, address(rewarder), MARKET_FUNDING, streamId);
+        emit RewarderFunded(market.poolId, address(rewarder), MARKET_FUNDING);
     }
 
     function _requireIdleMigrationState(ResolvedMarket memory market, address expectedExistingHook) private view {
@@ -330,7 +330,7 @@ contract DeepstateRewarderFactory is Ownable, ReentrancyGuard {
 
         DeepstateRewarderV2(rewarder).retireAndBurnBalance();
 
-        emit MarketRemoved(poolId_, rewarder);
+        emit MarketRewarderRemoved(poolId_, rewarder);
     }
 
     /// @notice Factory ownership cannot be renounced.

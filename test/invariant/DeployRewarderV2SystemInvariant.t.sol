@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {DeployRewarderV2System} from "../../script/DeployRewarderV2System.s.sol";
 import {DeepstateAddresses} from "../../script/config/DeepstateAddresses.sol";
+import {DGP001Bootstrap} from "../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../src/DeepstateRewarderFactory.sol";
 import {DeepstateV1Controller} from "../../src/DeepstateV1Controller.sol";
@@ -13,6 +14,14 @@ import {DeepstateV1Controller} from "../../src/DeepstateV1Controller.sol";
 contract OfflineDeploymentCodeMock {}
 
 contract OfflineDeploymentDeepMock {
+    function MINTER_ROLE() external pure returns (bytes32) {
+        return keccak256("MINTER_ROLE");
+    }
+
+    function hasRole(bytes32, address) external pure returns (bool) {
+        return false;
+    }
+
     function totalSupply() external pure returns (uint256) {
         return 0;
     }
@@ -36,6 +45,11 @@ contract DeployRewarderV2SystemInvariantHarness is DeployRewarderV2System {
         _deployIfMissing(MINTER_SALT, plan.minterInitCode, plan.minterController);
     }
 
+    function deployBootstrapFromPlan() external {
+        DeploymentPlan memory plan = _plan();
+        _deployIfMissing(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCode, plan.dgp001Bootstrap);
+    }
+
     function deployV1FromPlan() external {
         DeploymentPlan memory plan = _plan();
         _deployIfMissing(V1_CONTROLLER_SALT, plan.v1InitCode, plan.v1Controller);
@@ -53,6 +67,11 @@ contract DeployRewarderV2SystemInvariantHarness is DeployRewarderV2System {
     function verifyMinterFromPlan() external view {
         DeploymentPlan memory plan = _plan();
         _verifyMinterController(plan.minterController);
+    }
+
+    function verifyBootstrapFromPlan() external view {
+        DeploymentPlan memory plan = _plan();
+        _verifyBootstrap(plan.dgp001Bootstrap, plan.minterController);
     }
 
     function verifyV1FromPlan() external view {
@@ -75,13 +94,16 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
     DeployRewarderV2SystemInvariantHarness public immutable deployment;
 
     address public immutable minter;
+    address public immutable bootstrap;
     address public immutable v1Controller;
     address public immutable factory;
     bytes32 public immutable minterInitCodeHash;
+    bytes32 public immutable bootstrapInitCodeHash;
     bytes32 public immutable v1InitCodeHash;
     bytes32 public immutable factoryInitCodeHash;
 
     uint256 public minterAttempts;
+    uint256 public bootstrapAttempts;
     uint256 public v1Attempts;
     uint256 public factoryAttempts;
     uint256 public recordedDeploymentActions;
@@ -89,8 +111,16 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 
     constructor() {
         deployment = new DeployRewarderV2SystemInvariantHarness();
-        (minter, v1Controller, factory, minterInitCodeHash, v1InitCodeHash, factoryInitCodeHash) =
-            deployment.plannedAddresses();
+        (
+            minter,
+            bootstrap,
+            v1Controller,
+            factory,
+            minterInitCodeHash,
+            bootstrapInitCodeHash,
+            v1InitCodeHash,
+            factoryInitCodeHash
+        ) = deployment.plannedAddresses();
 
         OfflineDeploymentCodeMock codeMock = new OfflineDeploymentCodeMock();
         OfflineDeploymentDeepMock deepMock = new OfflineDeploymentDeepMock();
@@ -106,10 +136,17 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
     }
 
     function deployOne(uint8 component) external {
-        if (component % 3 == 0) {
+        if (component % 4 == 0) {
             ++minterAttempts;
             _deployMinterRecorded();
-        } else if (component % 3 == 1) {
+        } else if (component % 4 == 1) {
+            ++bootstrapAttempts;
+            // The Bootstrap derives and pins its configuration from the Minter Controller at construction, so this
+            // attempt fails closed until the planned Minter exists.
+            vm.record();
+            try deployment.deployBootstrapFromPlan() {} catch {}
+            _recordExternalProtocolWrites();
+        } else if (component % 4 == 2) {
             ++v1Attempts;
             _deployV1Recorded();
         } else {
@@ -128,6 +165,8 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
         this.deployOne(second);
         ++minterAttempts;
         _deployMinterRecorded();
+        ++bootstrapAttempts;
+        _deployBootstrapRecorded();
         ++v1Attempts;
         _deployV1Recorded();
         ++factoryAttempts;
@@ -143,6 +182,12 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
     function _deployV1Recorded() private {
         vm.record();
         deployment.deployV1FromPlan();
+        _recordExternalProtocolWrites();
+    }
+
+    function _deployBootstrapRecorded() private {
+        vm.record();
+        deployment.deployBootstrapFromPlan();
         _recordExternalProtocolWrites();
     }
 
@@ -174,15 +219,18 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 }
 
 contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
-    address internal constant EXPECTED_MINTER = 0x48D047816c4b2B083998Aa8ff7da01BD0f429944;
+    address internal constant EXPECTED_MINTER = 0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5;
+    address internal constant EXPECTED_BOOTSTRAP = 0x46f59ca750D4781b882a8F92BE11F0b23f537932;
     address internal constant EXPECTED_V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
-    address internal constant EXPECTED_FACTORY = 0xf02b7ba0317dD1a88f1793EC75382AC4F3bA9266;
+    address internal constant EXPECTED_FACTORY = 0xFF9E7971aB6E7111BB2F0aDA57a8E2c1256c3f98;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
-        0x3e845810a412e1180499612841cd0aae0f5e6c6b558910f6eb5252a60d76a859;
+        0xc36c59bdaf1845441031fec37a852bccc0780e13ac92c643612f34db191ecf6e;
+    bytes32 internal constant EXPECTED_BOOTSTRAP_INIT_CODE_HASH =
+        0x4430bc05d7be72ddde468617ac1e6973c63a585d7cf64d6397eea763687a9f88;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
         0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0x20015b9f826d1dedc33763faf70ab9dca3c8c2530afece06ee810e9cc6ef35f0;
+        0x289a57fb940d16d403c809c232adb6e38ff9430a2fbb3ed5556e87b28c1a981e;
 
     DeployRewarderV2SystemInvariantHandler internal handler;
     DeployRewarderV2SystemInvariantHarness internal deployment;
@@ -201,17 +249,21 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
     function invariant_ReleasePlanIsIndependentOfCallerTimeNonceAndPartialState() public view {
         (
             address minter,
+            address bootstrap,
             address v1Controller,
             address factory,
             bytes32 minterInitCodeHash,
+            bytes32 bootstrapInitCodeHash,
             bytes32 v1InitCodeHash,
             bytes32 factoryInitCodeHash
         ) = deployment.plannedAddresses();
 
         assertEq(minter, EXPECTED_MINTER);
+        assertEq(bootstrap, EXPECTED_BOOTSTRAP);
         assertEq(v1Controller, EXPECTED_V1_CONTROLLER);
         assertEq(factory, EXPECTED_FACTORY);
         assertEq(minterInitCodeHash, EXPECTED_MINTER_INIT_CODE_HASH);
+        assertEq(bootstrapInitCodeHash, EXPECTED_BOOTSTRAP_INIT_CODE_HASH);
         assertEq(v1InitCodeHash, EXPECTED_V1_INIT_CODE_HASH);
         assertEq(factoryInitCodeHash, EXPECTED_FACTORY_INIT_CODE_HASH);
     }
@@ -220,6 +272,10 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         if (EXPECTED_MINTER.code.length != 0) {
             assertEq(EXPECTED_MINTER.codehash, deployment.MINTER_RUNTIME_CODE_HASH());
             deployment.verifyMinterFromPlan();
+        }
+        if (EXPECTED_BOOTSTRAP.code.length != 0) {
+            assertEq(EXPECTED_BOOTSTRAP.codehash, deployment.DGP001_BOOTSTRAP_RUNTIME_CODE_HASH());
+            deployment.verifyBootstrapFromPlan();
         }
         if (EXPECTED_V1_CONTROLLER.code.length != 0) {
             assertEq(EXPECTED_V1_CONTROLLER.codehash, deployment.V1_CONTROLLER_RUNTIME_CODE_HASH());
@@ -239,22 +295,45 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_BootstrapCanExistOnlyAfterItsMinterControllerDependency() public view {
+        if (EXPECTED_BOOTSTRAP.code.length != 0) assertGt(EXPECTED_MINTER.code.length, 0);
+    }
+
     function invariant_DeploymentNeverActivatesGovernancePermissionsOrMutableState() public view {
         assertFalse(handler.externalProtocolWriteViolation());
 
         if (EXPECTED_MINTER.code.length != 0) {
             DeepstateMinterController minter = DeepstateMinterController(EXPECTED_MINTER);
             assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
-            assertEq(address(minter.legacyRewarder()), DeepstateAddresses.REWARDER);
             assertEq(minter.grossIssued(), 0);
-            assertFalse(minter.legacyEndowmentCreated());
-            assertEq(minter.legacyEndowmentSnapshotBlock(), 0);
-            assertEq(minter.legacyEndowmentSnapshotAt(), 0);
-            assertEq(minter.legacyToken0Accrued(), 0);
-            assertEq(minter.legacyToken1Accrued(), 0);
-            assertEq(minter.legacyEndowmentAmount(), 0);
-            assertEq(minter.legacyEndowmentStreamId(), 0);
             assertEq(minter.tokenAdministrationEndsAt(), 0);
+        }
+        if (EXPECTED_BOOTSTRAP.code.length != 0) {
+            DGP001Bootstrap bootstrap = DGP001Bootstrap(EXPECTED_BOOTSTRAP);
+            assertEq(bootstrap.ENDOWMENT_PERCENT(), 30);
+            assertEq(bootstrap.VESTING_DURATION(), 365 days);
+            assertEq(bootstrap.STREAM_GRANULARITY(), 1 seconds);
+            assertEq(bootstrap.governor(), DeepstateAddresses.GOVERNOR);
+            assertEq(address(bootstrap.minterController()), EXPECTED_MINTER);
+            assertEq(address(bootstrap.deepstateToken()), DeepstateAddresses.DEEP);
+            assertEq(address(bootstrap.sablierLockup()), DeepstateAddresses.SABLIER_LOCKUP);
+            assertEq(address(bootstrap.legacyRewarder()), DeepstateAddresses.REWARDER);
+            assertEq(bootstrap.recipient(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+            assertFalse(bootstrap.executed());
+            assertEq(bootstrap.snapshotBlock(), 0);
+            assertEq(bootstrap.snapshotAt(), 0);
+            assertEq(bootstrap.snapshotToken0(), address(0));
+            assertEq(bootstrap.snapshotToken1(), address(0));
+            assertEq(bootstrap.token0Accrued(), 0);
+            assertEq(bootstrap.token1Accrued(), 0);
+            assertEq(bootstrap.totalAccrued(), 0);
+            assertEq(bootstrap.endowmentAmount(), 0);
+            assertEq(bootstrap.preexistingBalanceBurned(), 0);
+            assertEq(bootstrap.postEndowmentSupply(), 0);
+            assertEq(bootstrap.streamId(), 0);
+            assertFalse(
+                bootstrap.deepstateToken().hasRole(bootstrap.deepstateToken().MINTER_ROLE(), EXPECTED_BOOTSTRAP)
+            );
         }
         if (EXPECTED_V1_CONTROLLER.code.length != 0) {
             assertEq(DeepstateV1Controller(EXPECTED_V1_CONTROLLER).owner(), DeepstateAddresses.GOVERNOR);
@@ -306,6 +385,49 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         deployment.validateExistingFromPlan();
     }
 
+    function test_BootstrapCannotDeployBeforeItsMinterControllerDependency() public {
+        vm.expectRevert();
+        deployment.deployBootstrapFromPlan();
+        assertEq(EXPECTED_BOOTSTRAP.code.length, 0);
+
+        deployment.deployMinterFromPlan();
+        deployment.deployBootstrapFromPlan();
+        deployment.verifyBootstrapFromPlan();
+    }
+
+    function test_FactoryCannotDeployBeforeBothControllerDependencies() public {
+        vm.expectRevert();
+        deployment.deployFactoryFromPlan();
+        assertEq(EXPECTED_FACTORY.code.length, 0);
+
+        deployment.deployMinterFromPlan();
+        vm.expectRevert();
+        deployment.deployFactoryFromPlan();
+        assertEq(EXPECTED_FACTORY.code.length, 0);
+
+        deployment.deployV1FromPlan();
+        deployment.deployFactoryFromPlan();
+        deployment.verifyFactoryFromPlan();
+    }
+
+    function test_ProductionOrderDeploysEveryContractAndIsIdempotent() public {
+        deployment.deployMinterFromPlan();
+        deployment.deployBootstrapFromPlan();
+        deployment.deployV1FromPlan();
+        deployment.deployFactoryFromPlan();
+
+        deployment.deployMinterFromPlan();
+        deployment.deployBootstrapFromPlan();
+        deployment.deployV1FromPlan();
+        deployment.deployFactoryFromPlan();
+
+        deployment.validateExistingFromPlan();
+        deployment.verifyMinterFromPlan();
+        deployment.verifyBootstrapFromPlan();
+        deployment.verifyV1FromPlan();
+        deployment.verifyFactoryFromPlan();
+    }
+
     function test_DeploymentActionsWriteNoExternalProtocolDependencyStorage() public {
         handler.recoverRelease(2, 1);
         assertGt(handler.recordedDeploymentActions(), 0);
@@ -315,13 +437,16 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
     function test_PartialDeploymentRecoversIdempotently() public {
         deployment.deployV1FromPlan();
         deployment.deployMinterFromPlan();
+        deployment.deployBootstrapFromPlan();
         deployment.deployV1FromPlan();
         deployment.deployMinterFromPlan();
+        deployment.deployBootstrapFromPlan();
         deployment.deployFactoryFromPlan();
         deployment.deployFactoryFromPlan();
 
         deployment.validateExistingFromPlan();
         assertEq(EXPECTED_MINTER.codehash, deployment.MINTER_RUNTIME_CODE_HASH());
+        assertEq(EXPECTED_BOOTSTRAP.codehash, deployment.DGP001_BOOTSTRAP_RUNTIME_CODE_HASH());
         assertEq(EXPECTED_V1_CONTROLLER.codehash, deployment.V1_CONTROLLER_RUNTIME_CODE_HASH());
         assertEq(EXPECTED_FACTORY.codehash, deployment.FACTORY_RUNTIME_CODE_HASH());
     }

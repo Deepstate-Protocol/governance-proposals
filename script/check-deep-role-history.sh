@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Usage: check-deep-role-history.sh [snapshot-block] [pre-activation|post-activation]
-# The post-activation mode additionally proves the exact three DGP-001 DEEP role events and the Factory's sole
+# The post-activation mode additionally proves the exact five DGP-001 DEEP role events and the Factory's sole
 # RolesUpdated grant on each Controller, all from the same atomic Governor execution.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -105,6 +105,7 @@ DEEP="$(solidity_address DEEP)"
 DEEP_DEPLOYER="$(solidity_address DEEP_DEPLOYER)"
 GOVERNOR="$(solidity_address GOVERNOR)"
 MINTER_CONTROLLER="$(solidity_address MINTER_CONTROLLER)"
+DGP001_BOOTSTRAP="$(solidity_address DGP001_BOOTSTRAP)"
 V1_CONTROLLER="$(solidity_address V1_CONTROLLER)"
 REWARDER_FACTORY="$(solidity_address REWARDER_FACTORY)"
 DEEPSTATE_INC_SAFE="$(solidity_address DEEPSTATE_INC_SAFE)"
@@ -159,6 +160,7 @@ role_event_count="$(jq -s 'length' "$logs_file")"
 deployer_topic="$(topic_address "$DEEP_DEPLOYER")"
 governor_topic="$(topic_address "$GOVERNOR")"
 minter_controller_topic="$(topic_address "$MINTER_CONTROLLER")"
+bootstrap_topic="$(topic_address "$DGP001_BOOTSTRAP")"
 expected_history="$(printf '%b\n' \
     "0x2338bd8\t0x1\t0x0\t$ROLE_GRANTED_TOPIC\t$DEFAULT_ADMIN_ROLE\t$deployer_topic\t$deployer_topic" \
     "0x2338bef\t0x2\t0x0\t$ROLE_GRANTED_TOPIC\t$MINTER_ROLE\t$deployer_topic\t$deployer_topic" \
@@ -174,7 +176,7 @@ if [[ "$ROLE_PHASE" == "pre-activation" ]]; then
     fi
 else
     baseline_history="$(head -n 5 <<<"$actual_history")"
-    if [[ "$role_event_count" != "8" || "$baseline_history" != "$expected_history" ]]; then
+    if [[ "$role_event_count" != "10" || "$baseline_history" != "$expected_history" ]]; then
         printf 'DEEP role history does not begin with the exact five-event pre-activation baseline.\n' >&2
         printf 'Expected baseline:\n%s\nActual history:\n%s\n' "$expected_history" "$actual_history" >&2
         exit 1
@@ -187,6 +189,8 @@ else
             "$logs_file"
     )"
     expected_activation_history="$(printf '%b\n' \
+        "$ROLE_GRANTED_TOPIC\t$MINTER_ROLE\t$bootstrap_topic\t$governor_topic" \
+        "$ROLE_REVOKED_TOPIC\t$MINTER_ROLE\t$bootstrap_topic\t$bootstrap_topic" \
         "$ROLE_GRANTED_TOPIC\t$DEFAULT_ADMIN_ROLE\t$minter_controller_topic\t$governor_topic" \
         "$ROLE_REVOKED_TOPIC\t$DEFAULT_ADMIN_ROLE\t$governor_topic\t$governor_topic" \
         "$ROLE_GRANTED_TOPIC\t$MINTER_ROLE\t$minter_controller_topic\t$minter_controller_topic"
@@ -198,11 +202,11 @@ else
         exit 1
     fi
     if ! jq -se \
-        'length == 8
-        and ((.[5:8] | map(.transactionHash | ascii_downcase) | unique | length) == 1)
-        and ((.[5:8] | map(.blockNumber | ascii_downcase) | unique | length) == 1)' \
+        'length == 10
+        and ((.[5:10] | map(.transactionHash | ascii_downcase) | unique | length) == 1)
+        and ((.[5:10] | map(.blockNumber | ascii_downcase) | unique | length) == 1)' \
         "$logs_file" >/dev/null; then
-        printf 'The three DEEP activation role events were not emitted by one atomic transaction.\n' >&2
+        printf 'The five DEEP activation role events were not emitted by one atomic transaction.\n' >&2
         exit 1
     fi
 fi
@@ -220,6 +224,8 @@ if [[ "$ROLE_PHASE" == "pre-activation" ]]; then
     require_false "$DEFAULT_ADMIN_ROLE" "$DEEP_DEPLOYER"
     require_false "$MINTER_ROLE" "$DEEP_DEPLOYER"
     require_false "$MINTER_ROLE" "$GOVERNOR"
+    require_false "$DEFAULT_ADMIN_ROLE" "$DGP001_BOOTSTRAP"
+    require_false "$MINTER_ROLE" "$DGP001_BOOTSTRAP"
 else
     if [[ "$(rpc_call "$DEEP" 'hasRole(bytes32,address)(bool)' "$DEFAULT_ADMIN_ROLE" "$MINTER_CONTROLLER")" != "true" ]]; then
         printf 'Minter Controller is not the live DEEP default admin at block %s\n' "$SNAPSHOT_BLOCK" >&2
@@ -229,7 +235,7 @@ else
         printf 'Minter Controller is not the live DEEP token minter at block %s\n' "$SNAPSHOT_BLOCK" >&2
         exit 1
     fi
-    for account in "$DEEP_DEPLOYER" "$GOVERNOR" "$REWARDER_FACTORY" "$DEEPSTATE_INC_SAFE" "$REWARDER"; do
+    for account in "$DEEP_DEPLOYER" "$GOVERNOR" "$DGP001_BOOTSTRAP" "$REWARDER_FACTORY" "$DEEPSTATE_INC_SAFE" "$REWARDER"; do
         require_false "$DEFAULT_ADMIN_ROLE" "$account"
         require_false "$MINTER_ROLE" "$account"
     done
@@ -296,7 +302,7 @@ else
     printf 'Exact post-DGP-001 role histories verified\n'
     printf '  deployment block: %s\n' "$DEEP_DEPLOYMENT_BLOCK"
     printf '  snapshot block: %s\n' "$SNAPSHOT_BLOCK"
-    printf '  DEEP role events: 8\n'
+    printf '  DEEP role events: 10\n'
     printf '  activation transaction: %s\n' "$activation_transaction"
     printf '  sole DEEP default admin/minter: %s\n' "$MINTER_CONTROLLER"
     printf '  sole Controller-local delegate: %s\n' "$REWARDER_FACTORY"
