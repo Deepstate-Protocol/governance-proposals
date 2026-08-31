@@ -38,6 +38,9 @@ contract DGP002Test is Test {
     bytes32 private constant _MINTED_WITH_VESTING_TOPIC =
         keccak256("MintedWithVesting(address,address,uint256,address,uint256,uint256)");
     bytes32 private constant _GROSS_ISSUANCE_RECORDED_TOPIC = keccak256("GrossIssuanceRecorded(uint256,uint256)");
+    bytes32 private constant _TRANSFER_TOPIC = keccak256("Transfer(address,address,uint256)");
+    bytes32 private constant _ERC1967_IMPLEMENTATION_SLOT =
+        0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 private constant _PINNED_ACTIVE_BOOK_ID =
         0xdf941c235503a5d2e67aee5dea00f2965f99421c0d034bd77f924c05c66bf399;
 
@@ -207,6 +210,18 @@ contract DGP002Test is Test {
                 .allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP),
             0
         );
+    }
+
+    function testSubmissionPreflightRejectsSablierComptrollerImplementationDrift() public {
+        _setUpActivatedFork();
+        vm.store(
+            DeepstateAddresses.SABLIER_COMPTROLLER,
+            _ERC1967_IMPLEMENTATION_SLOT,
+            bytes32(uint256(uint160(address(0xBEEF))))
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(DeployDGP002.PreconditionFailed.selector, 55));
+        proposal.validateSubmissionPreconditions();
     }
 
     function _setUpActivatedFork() private {
@@ -383,6 +398,40 @@ contract DGP002Test is Test {
 
         assertEq(mintEventCount, 3);
         assertEq(grossEventCount, 3);
+        _assertDeepTransferReceipt(logs);
+    }
+
+    function _assertDeepTransferReceipt(Vm.Log[] memory logs) private view {
+        uint256 primaryMintCount;
+        uint256 vestingMintCount;
+        uint256 vestingDepositCount;
+
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory entry = logs[i];
+            if (
+                entry.emitter != DeepstateAddresses.DEEP || entry.topics.length != 3
+                    || entry.topics[0] != _TRANSFER_TOPIC
+            ) continue;
+
+            address from = address(uint160(uint256(entry.topics[1])));
+            address to = address(uint160(uint256(entry.topics[2])));
+            uint256 amount = abi.decode(entry.data, (uint256));
+            if (from == address(0) && to == _volunteerAt(primaryMintCount)) {
+                assertLt(primaryMintCount, 3);
+                assertEq(amount, _volunteerAmountAt(primaryMintCount));
+                ++primaryMintCount;
+            } else if (from == address(0) && to == DeepstateAddresses.MINTER_CONTROLLER) {
+                assertEq(amount, proposal.VESTING_PER_MINT());
+                ++vestingMintCount;
+            } else if (from == DeepstateAddresses.MINTER_CONTROLLER && to == DeepstateAddresses.SABLIER_LOCKUP) {
+                assertEq(amount, proposal.VESTING_PER_MINT());
+                ++vestingDepositCount;
+            }
+        }
+
+        assertEq(primaryMintCount, 3);
+        assertEq(vestingMintCount, 3);
+        assertEq(vestingDepositCount, 3);
     }
 
     function _volunteerAt(uint256 index) private view returns (address) {

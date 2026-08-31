@@ -188,8 +188,9 @@ Only steps 3 through 7 are encoded in the eight-action atomic Governor execution
 order between cleanup and execution makes the execution revert safely; the book and legacy-cursor checks must be
 reopened immediately before broadcasting.
 
-The second proposal is expected to make one controlled 10-million-DEEP primary mint to the Governor, creating the
-corresponding Deepstate Inc stream, and then transfer the exact three volunteer allocations from the Governor.
+The second proposal makes three controlled primary mints directly to the exact volunteer recipients. Each mint creates
+its own `1_428_571.428571428571428571`-DEEP one-year Deepstate Inc stream; the primary amounts sum to exactly 10 million
+DEEP, while independent per-call flooring makes the three streams total `4_285_714.285714285714285713` DEEP.
 
 The first proposal's fork test must prove the execution-time accrual snapshot and 30% endowment, both exact Sablier
 streams, 3-billion caps, exact 730-day deadline, exhaustive sole-admin/minter state, unchanged Router fee, exact V1

@@ -9,8 +9,11 @@ DGP-001 execution and rerun the suite without deployment or market-idleness mock
 ## External transaction sequence
 
 1. **Reopen the DGP-001 result.** Confirm DGP-001 is `Executed`, verify the three production deployment receipts and
-   code hashes, scan DEEP's complete role history, and run DGP-001's immediate verifier before any later authorized
-   issuance changes its exact initial-state assertions.
+   code hashes, and run DGP-001's immediate verifier before any later authorized issuance changes its exact
+   initial-state assertions. At the selected snapshot, run
+   `bash script/check-deep-role-history.sh "$role_snapshot" post-activation`; this requires exactly the five original
+   DEEP role events, DGP-001's three atomic DEEP role events, and exactly one Factory role grant on each Controller,
+   rejecting every unknown or temporary role assignment.
 2. **Run DGP-002's submission gates without broadcasting.** Call `validateSubmissionPreconditions()`. It requires the
    pinned DGP-001 proposal to be executed, the reviewed Controller/Factory/Router authority graph to remain intact,
    controlled minting to remain inside its 730-day term, enough live-supply and permanent gross-issuance headroom for
@@ -21,7 +24,8 @@ DGP-001 execution and rerun the suite without deployment or market-idleness mock
    All three action values are zero.
 4. **Submit vote transactions after the live snapshot.** Each voter calls `castVote(proposalId, 1)`. Query the live
    `proposalDeadline` after voting because late quorum can extend it, then wait for `state(proposalId) == Succeeded`.
-5. **Run the execution gates without broadcasting.** Repeat the complete DEEP role-history scan and call
+5. **Run the execution gates without broadcasting.** Repeat
+   `bash script/check-deep-role-history.sh "$role_snapshot" post-activation` at a fresh snapshot and call
    `validateExecutionPreconditions()`. Confirm the pinned proposal is still `Succeeded`, controlled minting is still
    active, and both caps still have complete issuance headroom.
 6. **Execute one atomic Governor transaction.** Any address calls
@@ -68,3 +72,7 @@ or initial unlock. Because the Controller floors each call's 30/70 calculation i
   one-second granularity, and both cancellation and transfer disabled.
 - The Minter Controller finishes with zero DEEP and zero Sablier allowance.
 - A replay attempt fails because the Governor proposal is already `Executed`.
+
+DGP-002 intentionally also requires DGP-001's delegated authority and active NVDA Rewarder V2 state to remain intact.
+If the operator retires that market or governance changes those authorities before DGP-002 executes, the proposal
+reverts and must be reconsidered rather than paying under a materially different post-DGP-001 system state.

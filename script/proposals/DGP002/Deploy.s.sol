@@ -15,6 +15,8 @@ import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
 interface ISablierDGP002View {
     function balanceOf(address owner) external view returns (uint256 balance);
+    function comptroller() external view returns (address);
+    function nativeToken() external view returns (address);
     function ownerOf(uint256 streamId) external view returns (address owner);
     function getRecipient(uint256 streamId) external view returns (address recipient);
     function getSender(uint256 streamId) external view returns (address sender);
@@ -27,6 +29,24 @@ interface ISablierDGP002View {
     function isCancelable(uint256 streamId) external view returns (bool result);
     function isTransferable(uint256 streamId) external view returns (bool result);
     function nextStreamId() external view returns (uint256);
+}
+
+interface ISablierComptrollerDGP002View {
+    function VERSION() external view returns (string memory);
+    function admin() external view returns (address);
+    function oracle() external view returns (address);
+    function MAX_FEE_USD() external view returns (uint256);
+    function getMinFeeUSD(uint8 protocol) external view returns (uint256);
+    function calculateMinFeeWei(uint8 protocol) external view returns (uint256);
+}
+
+interface ISafeDGP002View {
+    function getOwners() external view returns (address[] memory);
+    function getThreshold() external view returns (uint256);
+    function getModulesPaginated(address start, uint256 pageSize)
+        external
+        view
+        returns (address[] memory array, address next);
 }
 
 /// @notice Exact DGP-002 volunteer-allocation payload, entrypoint, and immediate execution verifier.
@@ -51,6 +71,10 @@ contract DeployDGP002 is DeepstateProposalScript {
     uint256 private constant _FACTORY_MINTER_ROLE = 1;
     uint256 private constant _FACTORY_HOOK_MANAGER_ROLE = 1;
     uint256 private constant _DGP001_MARKET_FUNDING = 100_000_000e18;
+    uint8 private constant _SABLIER_PROTOCOL_LOCKUP = 2;
+    address private constant _SAFE_MODULES_SENTINEL = address(1);
+    bytes32 private constant _ERC1967_IMPLEMENTATION_SLOT =
+        0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     error PreconditionFailed(uint256 condition);
     error PostconditionFailed(uint256 condition);
@@ -119,6 +143,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 3);
         _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 4);
         _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 5);
+        _validateExternalDependencies();
 
         _pre(governor.state(_DGP001_PROPOSAL_ID) == 7, 6);
         _pre(governor.proposalProposer(_DGP001_PROPOSAL_ID) == PROPOSER, 7);
@@ -222,6 +247,60 @@ contract DeployDGP002 is DeepstateProposalScript {
             47
         );
         _post(IDeepstateV1(DeepstateAddresses.ROUTER).owner() == DeepstateAddresses.V1_CONTROLLER, 48);
+    }
+
+    function _validateExternalDependencies() private view {
+        ISablierDGP002View lockup = ISablierDGP002View(DeepstateAddresses.SABLIER_LOCKUP);
+        ISablierComptrollerDGP002View comptroller =
+            ISablierComptrollerDGP002View(DeepstateAddresses.SABLIER_COMPTROLLER);
+
+        _pre(DeepstateAddresses.SABLIER_COMPTROLLER.codehash == DeepstateAddresses.SABLIER_COMPTROLLER_CODEHASH, 51);
+        _pre(
+            DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION.codehash
+                == DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH,
+            52
+        );
+        _pre(lockup.comptroller() == DeepstateAddresses.SABLIER_COMPTROLLER, 53);
+        _pre(lockup.nativeToken() != DeepstateAddresses.DEEP, 54);
+        _pre(
+            _implementationOf(DeepstateAddresses.SABLIER_COMPTROLLER)
+                == DeepstateAddresses.SABLIER_COMPTROLLER_IMPLEMENTATION,
+            55
+        );
+        _pre(
+            keccak256(bytes(comptroller.VERSION())) == keccak256(bytes(DeepstateAddresses.SABLIER_COMPTROLLER_VERSION)),
+            56
+        );
+        _pre(comptroller.admin() == DeepstateAddresses.SABLIER_COMPTROLLER_ADMIN, 57);
+        _pre(comptroller.oracle() == DeepstateAddresses.SABLIER_COMPTROLLER_ORACLE, 58);
+        _pre(comptroller.MAX_FEE_USD() == DeepstateAddresses.SABLIER_MAX_FEE_USD, 59);
+        _pre(comptroller.getMinFeeUSD(_SABLIER_PROTOCOL_LOCKUP) == DeepstateAddresses.SABLIER_LOCKUP_MIN_FEE_USD, 60);
+        _pre(comptroller.calculateMinFeeWei(_SABLIER_PROTOCOL_LOCKUP) == 0, 61);
+
+        _pre(DeepstateAddresses.DEEPSTATE_INC_SAFE.codehash == DeepstateAddresses.DEEPSTATE_INC_SAFE_CODEHASH, 62);
+        _pre(
+            DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON.codehash
+                == DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON_CODEHASH,
+            63
+        );
+        _pre(_safeSingleton() == DeepstateAddresses.DEEPSTATE_INC_SAFE_SINGLETON, 64);
+        ISafeDGP002View safe = ISafeDGP002View(DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        address[] memory owners = safe.getOwners();
+        _pre(owners.length == 1, 65);
+        if (owners.length == 1) _pre(owners[0] == DeepstateAddresses.DEEPSTATE_INC_SAFE_OWNER, 66);
+        _pre(safe.getThreshold() == DeepstateAddresses.DEEPSTATE_INC_SAFE_THRESHOLD, 67);
+        (address[] memory modules, address next) = safe.getModulesPaginated(_SAFE_MODULES_SENTINEL, 100);
+        _pre(modules.length == 0, 68);
+        _pre(next == _SAFE_MODULES_SENTINEL, 69);
+        _pre(DeepstateAddresses.DEEPSTATE_INC_SAFE_OWNER.code.length == 0, 70);
+    }
+
+    function _implementationOf(address proxy) private view returns (address) {
+        return address(uint160(uint256(vm.load(proxy, _ERC1967_IMPLEMENTATION_SLOT))));
+    }
+
+    function _safeSingleton() private view returns (address) {
+        return address(uint160(uint256(vm.load(DeepstateAddresses.DEEPSTATE_INC_SAFE, bytes32(0)))));
     }
 
     function _checkStream(
