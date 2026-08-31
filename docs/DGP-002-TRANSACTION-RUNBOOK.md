@@ -52,7 +52,7 @@ The Governor makes these calls in this exact order:
    3,333,333.333333333333333334 DEEP)`.
 2. Call `MinterController.mint(0x5715d61f99487abD65D1091b5d3a46c1b2879355,
    3,333,333.333333333333333333 DEEP)`.
-3. Call `MinterController.mint(0xEb01dF2A97A966f96B1765c78ccD97f3412765F0,
+3. Call `MinterController.mint(0x4019921387856f3c5932b0f94Ac5E73337689721,
    3,333,333.333333333333333333 DEEP)`.
 
 The three direct primary mints sum to exactly `10,000,000 DEEP`; the first recipient receives the one indivisible

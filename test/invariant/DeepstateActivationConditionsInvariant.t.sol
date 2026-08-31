@@ -96,7 +96,7 @@ contract DeepstateActivationConditionsHandler is Test {
     address public constant INC_SAFE = 0x83fB2739abd9963c5341E4A176D93a7E5Ee73445;
     address public constant VOLUNTEER_A = 0x1fb3A8192d00aDe0ddC0EEcB4D872149Eb9C4157;
     address public constant VOLUNTEER_B = 0x5715d61f99487abD65D1091b5d3a46c1b2879355;
-    address public constant VOLUNTEER_C = 0xEb01dF2A97A966f96B1765c78ccD97f3412765F0;
+    address public constant VOLUNTEER_C = 0x4019921387856f3c5932b0f94Ac5E73337689721;
     address public constant FEE_RECIPIENT = address(0xFEE);
     address public constant LEGACY_BYPASS_MINTER = address(0x4000);
     address public constant OUTSIDER = address(0x5000);
