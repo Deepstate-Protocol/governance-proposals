@@ -32,7 +32,7 @@ contract DGP002Test is Test {
     uint256 internal constant FORK_BLOCK = 50358350;
     bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x61ab68ce84efae2591aeaa698a08e2774851631675e4ae53951936c02388f94d;
+        0x6437cd5365c26eee8f7cb5c9a954432ca7ace5ed69007d2d64e67874e9c308e0;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _COMBINED_ISSUANCE = 14_285_714_285714285714285713;
