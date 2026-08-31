@@ -1,8 +1,9 @@
 # Proposal index
 
-No submission-ready governance proposals have been authored yet. The Rewarder V2 implementation candidate has been
-relocated into `src/` and `test/`, but it remains unnumbered until its production deployment inputs and exact activation
-payload are dictated and reviewed.
+No proposal is ready to submit yet. DGP-001 has a numbered, exact payload candidate and matching tests, but its four
+deterministic target contracts are not deployed and its final unmocked archive-fork release test is outstanding.
+DGP-002 has an exact three-mint payload candidate and a sequential DGP-001-to-DGP-002 fork suite; it must be repinned
+to a real post-DGP-001 production block after DGP-001 executes.
 
 Voter-facing text that has been dictated but does not yet have a deployable, fully tested payload is preserved under
 `proposals/drafts/`. A draft moves into this directory only when its matching deployment script and pinned-fork test
@@ -19,6 +20,5 @@ restriction before computing the description hash and pinned proposal ID.
 
 | Proposal | Status | Summary |
 | --- | --- | --- |
-| [`DGP-001`](drafts/DGP-001.md) | Draft | Establish the Deepstate Inc endowment and activate the two-year controlled-minting policy. |
-| [`DGP-002`](drafts/DGP-002.md) | Draft | Allocate exactly 10 million DEEP to three volunteer team members. |
-| [`DGP-003`](drafts/DGP-003.md) | Draft | Activate the constrained Rewarder V2 market-deployment authority. |
+| [`DGP-001`](DGP-001.md) | Pre-deployment payload candidate | Establish the Deepstate Inc endowment through a one-use Bootstrap, activate controlled minting, and atomically replace the live Rewarder with Rewarder V2. |
+| [`DGP-002`](DGP-002.md) | Sequential pre-deployment payload candidate | Allocate exactly 10 million DEEP to three volunteer team members through three controlled mints. |

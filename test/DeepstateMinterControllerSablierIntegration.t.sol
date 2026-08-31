@@ -18,7 +18,7 @@ contract SablierComptrollerStub {
 }
 
 contract DeepstateMinterControllerSablierIntegrationTest is Test {
-    uint256 internal constant MINT_CAP = 20_000_000_000e18;
+    uint256 internal constant MINT_CAP = 3_000_000_000e18;
 
     DeepstateToken internal deep;
     DeepstateMinterController internal minterController;
@@ -35,10 +35,14 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
             address(this), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP
         );
 
-        deep.grantRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
+        minterController.activateTokenAdministration();
+    }
+
+    function test_ActivationRecordsCurrentSupplyWithoutCreatingAStream() public view {
+        assertEq(minterController.grossIssued(), deep.totalSupply());
+        assertEq(sablier.nextStreamId(), 1);
     }
 
     function test_RealSablierV4StreamVestsLinearlyForOneYear() public {

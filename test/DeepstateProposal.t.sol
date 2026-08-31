@@ -145,6 +145,30 @@ contract DriftedExampleProposalScript is ExampleProposalScript {
     }
 }
 
+contract GatedExampleProposalScript is ExampleProposalScript {
+    bool public rejectSubmission;
+    bool public rejectExecution;
+
+    error SubmissionPreconditionFailed();
+    error ExecutionPreconditionFailed();
+
+    function setRejectSubmission(bool value) external {
+        rejectSubmission = value;
+    }
+
+    function setRejectExecution(bool value) external {
+        rejectExecution = value;
+    }
+
+    function _beforeSubmission() internal view override {
+        if (rejectSubmission) revert SubmissionPreconditionFailed();
+    }
+
+    function _beforeExecution() internal view override {
+        if (rejectExecution) revert ExecutionPreconditionFailed();
+    }
+}
+
 contract ValueProposalScript is DeepstateProposalScript {
     function proposer() public pure override returns (address) {
         return address(0xA11CE);
@@ -385,6 +409,25 @@ contract DeepstateProposalTest is Test {
     function testSubmitsToValidatedLiveAddress() public {
         _installGovernor(address(new MockDeepstateGovernor()));
         assertEq(proposalScript.run(), proposalScript.proposalId());
+    }
+
+    function testProposalSpecificPreconditionsGateSubmissionAndExecution() public {
+        _installGovernor(address(new MockDeepstateGovernor()));
+        GatedExampleProposalScript gatedProposal = new GatedExampleProposalScript();
+
+        gatedProposal.setRejectSubmission(true);
+        vm.expectRevert(GatedExampleProposalScript.SubmissionPreconditionFailed.selector);
+        gatedProposal.run();
+
+        gatedProposal.setRejectSubmission(false);
+        assertEq(gatedProposal.run(), gatedProposal.proposalId());
+
+        gatedProposal.setRejectExecution(true);
+        vm.expectRevert(GatedExampleProposalScript.ExecutionPreconditionFailed.selector);
+        gatedProposal.execute();
+
+        gatedProposal.setRejectExecution(false);
+        assertEq(gatedProposal.execute(), gatedProposal.proposalId());
     }
 
     function testVerifiesRegisteredProposal() public {

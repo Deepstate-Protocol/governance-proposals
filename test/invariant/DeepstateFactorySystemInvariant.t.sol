@@ -38,11 +38,52 @@ contract FactoryInvariantToken is ERC20 {
     }
 }
 
+contract FactoryInvariantLegacyRewarder {
+    address public deepstate;
+    address public rewardToken;
+    bytes32 public poolId;
+    address public token0;
+    address public token1;
+
+    mapping(address token => uint32 nonce) private _rewardeeNonce;
+    mapping(address token => uint64 startedAt) private _rewardeeStartedAt;
+    mapping(address token => uint96 accrued) private _totalAccrued;
+
+    constructor(address deepstate_, address rewardToken_, bytes32 poolId_, address token0_, address token1_) {
+        deepstate = deepstate_;
+        rewardToken = rewardToken_;
+        poolId = poolId_;
+        token0 = token0_;
+        token1 = token1_;
+    }
+
+    function setPoolId(bytes32 poolId_) external {
+        poolId = poolId_;
+    }
+
+    function setRewardee(address token, uint32 nonce, uint64 startedAt) external {
+        _rewardeeNonce[token] = nonce;
+        _rewardeeStartedAt[token] = startedAt;
+    }
+
+    function setTotalAccrued(address token, uint96 accrued) external {
+        _totalAccrued[token] = accrued;
+    }
+
+    function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt) {
+        return (_rewardeeNonce[token], _rewardeeStartedAt[token]);
+    }
+
+    function totalAccrued(address token) external view returns (uint96 accrued) {
+        return _totalAccrued[token];
+    }
+}
+
 /// @dev Stateful model for the Factory, both controllers, the Router, and the minting dependency.
 /// Every action catches expected reverts. A reverted lifecycle call is required to leave all
 /// relevant Factory, Router, token, Sablier, and Rewarder state unchanged.
 contract DeepstateFactorySystemHandler is Test {
-    uint256 public constant INITIAL_FUNDING_BUDGET = 1_500_000_000e18;
+    uint256 public constant FUNDING_BUDGET = 1_000_000_000e18;
     uint256 public constant MINT_CAP = 6_000_000_000e18;
     uint256 public constant GROSS_ISSUANCE_CAP = 10_000_000_000e18;
     uint256 public constant ROUTER_TOKEN0_ACTIVE_FLAG = uint256(1) << 254;
@@ -78,13 +119,12 @@ contract DeepstateFactorySystemHandler is Test {
     mapping(address stock => address rewarder) public modelRewarder;
     mapping(address stock => uint160 startQuantity) public modelStartQuantity;
     mapping(address stock => uint160 maxQuantity) public modelMaxQuantity;
-    mapping(address stock => bool toppedUp) public modelToppedUp;
     mapping(address stock => bool removed) public modelRemoved;
     mapping(address stock => uint256 flags) public modelHookFlags;
     mapping(uint256 streamId => uint256 primaryAmount) public modelFactoryPrimaryForStream;
 
     uint256 public successfulDeployments;
-    uint256 public successfulTopUps;
+    uint256 public successfulMarketMigrations;
     uint256 public successfulRemovals;
     uint256 public successfulMintCalls;
     uint256 public totalVestingMinted;
@@ -102,6 +142,7 @@ contract DeepstateFactorySystemHandler is Test {
     uint256 public mintWindowOrCapViolations;
     uint256 public sablierDependencyViolations;
     uint256 public ownershipMigrationViolations;
+    uint256 public migrationGuardViolations;
 
     struct DeploySnapshot {
         uint256 committed;
@@ -115,7 +156,6 @@ contract DeepstateFactorySystemHandler is Test {
         address hook;
         uint256 routerPoolState;
         bool marketDeployed;
-        bool toppedUp;
     }
 
     struct FundingSnapshot {
@@ -133,7 +173,6 @@ contract DeepstateFactorySystemHandler is Test {
         address hook;
         uint256 routerPoolState;
         bool marketDeployed;
-        bool toppedUp;
         bool rewarderRetired;
         address rewarderOwner;
     }
@@ -149,17 +188,27 @@ contract DeepstateFactorySystemHandler is Test {
         sablier = new MockSablierLockupLinearV4();
         deepstate = new DeepstateV1();
         v1Controller = new DeepstateV1Controller(address(this), address(deepstate));
+        (address legacyToken0, address legacyToken1) = _sort(_stocks[0], address(usdG));
+        FactoryInvariantLegacyRewarder legacyRewarder = new FactoryInvariantLegacyRewarder(
+            address(deepstate),
+            address(deep),
+            keccak256(abi.encode(legacyToken0, legacyToken1)),
+            legacyToken0,
+            legacyToken1
+        );
+        legacyRewarder.setTotalAccrued(legacyToken0, 4);
+        deepstate.setPoolHookConfig(legacyToken0, legacyToken1, address(legacyRewarder), true, true);
         minterController = new DeepstateMinterController(
             address(this), address(deep), address(sablier), VESTING_RECIPIENT, MINT_CAP, GROSS_ISSUANCE_CAP
         );
         factory = new DeepstateRewarderFactory(
-            address(this), address(v1Controller), address(minterController), address(usdG), INITIAL_FUNDING_BUDGET
+            address(this), address(v1Controller), address(minterController), address(usdG), FUNDING_BUDGET
         );
 
-        deep.grantRole(deep.MINTER_ROLE(), address(minterController));
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
+        minterController.activateTokenAdministration();
+        deepstate.setPoolHookConfig(legacyToken0, legacyToken1, address(0), false, false);
 
         deepstate.transferOwnership(address(v1Controller));
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
@@ -220,7 +269,7 @@ contract DeepstateFactorySystemHandler is Test {
         bool hasMinterRole = minterController.hasAnyRole(address(factory), minterController.MINTER_ROLE());
         bool hasHookRole = v1Controller.hasAnyRole(address(factory), v1Controller.HOOK_MANAGER_ROLE());
         bool routerOwned = deepstate.owner() == address(v1Controller);
-        bool canMint = _canMint(factory.INITIAL_FUNDING());
+        bool canMint = _canMint(factory.MARKET_FUNDING());
         bool sablierWorking = !sablier.revertCreate();
 
         DeploySnapshot memory before_ = _deploySnapshot(stockToken);
@@ -239,7 +288,7 @@ contract DeepstateFactorySystemHandler is Test {
         if (!routerOwned) ++routerOwnershipViolations;
         if (!validConfig) ++marketValidationViolations;
         if (block.timestamp < before_.nextDeploymentAt) ++cooldownViolations;
-        if (before_.committed + factory.INITIAL_FUNDING() > factory.initialFundingBudget()) ++budgetViolations;
+        if (before_.committed + factory.MARKET_FUNDING() > factory.fundingBudget()) ++budgetViolations;
         if (
             before_.activeRewarder != address(0) || before_.marketDeployed || before_.hook != address(0)
                 || modelEverDeployed[stockToken]
@@ -249,9 +298,9 @@ contract DeepstateFactorySystemHandler is Test {
 
         ++successfulDeployments;
         ++successfulMintCalls;
-        totalVestingMinted += _vesting(factory.INITIAL_FUNDING());
+        totalVestingMinted += _vesting(factory.MARKET_FUNDING());
         _successfulDeploymentTimestamps.push(block.timestamp);
-        _recordAndAssertFactoryStream(before_.nextStreamId, factory.INITIAL_FUNDING());
+        _recordAndAssertFactoryStream(before_.nextStreamId, factory.MARKET_FUNDING());
 
         if (recognizedStock) {
             modelEverDeployed[stockToken] = true;
@@ -262,17 +311,17 @@ contract DeepstateFactorySystemHandler is Test {
         }
 
         bytes32 poolId = _poolId(stockToken);
-        assertEq(factory.initialFundingCommitted(), before_.committed + factory.INITIAL_FUNDING());
+        assertEq(factory.fundingCommitted(), before_.committed + factory.MARKET_FUNDING());
         assertEq(factory.nextDeploymentAt(), block.timestamp + factory.DEPLOYMENT_COOLDOWN());
-        assertEq(deep.totalSupply(), before_.totalSupply + _combined(factory.INITIAL_FUNDING()));
-        assertEq(minterController.grossIssued(), before_.grossIssued + _combined(factory.INITIAL_FUNDING()));
+        assertEq(deep.totalSupply(), before_.totalSupply + _combined(factory.MARKET_FUNDING()));
+        assertEq(minterController.grossIssued(), before_.grossIssued + _combined(factory.MARKET_FUNDING()));
         assertEq(sablier.nextStreamId(), before_.nextStreamId + 1);
         assertTrue(factory.marketDeployed(poolId));
         assertEq(factory.activeRewarder(poolId), rewarder);
         assertEq(factory.rewarderPool(rewarder), poolId);
         assertEq(deepstate.poolHook(poolId), rewarder);
         assertEq(routerHookFlags(stockToken), _semanticHookFlags(stockToken, stockBuySideActive, usdGBuySideActive));
-        assertEq(deep.balanceOf(rewarder), factory.INITIAL_FUNDING());
+        assertEq(deep.balanceOf(rewarder), factory.MARKET_FUNDING());
     }
 
     /// @dev Higher-probability valid transition used alongside the adversarial arbitrary-config action.
@@ -280,56 +329,96 @@ contract DeepstateFactorySystemHandler is Test {
         this.attemptDeploy(stockSeed % _stocks.length, startSeed, 1_003, 3, asOperator ? 1 : 0);
     }
 
-    function attemptTopUp(uint256 stockSeed, uint8 callerSeed, uint8 expectedRewarderSeed) external {
+    /// @dev Installs a realistic legacy predecessor, then exercises the governance-only atomic migration path.
+    /// Modes cover the valid path, a live legacy cursor, a mismatched pool identity, a wrong expected hook, and zero.
+    function attemptMigrateLegacyMarket(uint256 stockSeed, uint256 startSeed, uint8 callerSeed, uint8 modeSeed)
+        external
+    {
         address stockToken = _stocks[stockSeed % _stocks.length];
         bytes32 poolId = _poolId(stockToken);
-        address active = factory.activeRewarder(poolId);
-        address expectedRewarder =
-            expectedRewarderSeed % 3 == 0 ? active : (expectedRewarderSeed % 3 == 1 ? FOREIGN_HOOK : address(0));
-        address caller = _topUpCaller(callerSeed);
+        if (factory.marketDeployed(poolId)) return;
 
+        (address token0, address token1) = _sort(stockToken, address(usdG));
+        FactoryInvariantLegacyRewarder predecessor =
+            new FactoryInvariantLegacyRewarder(address(deepstate), address(deep), poolId, token0, token1);
+        uint8 mode = modeSeed % 5;
+        if (mode == 1) predecessor.setRewardee(token0, 1, 1);
+        else if (mode == 2) predecessor.setPoolId(bytes32(uint256(poolId) + 1));
+
+        _installExternalHook(stockToken, address(predecessor), true, true);
+        modelHookFlags[stockToken] = _ROUTER_HOOK_FLAGS;
+
+        uint160 startQuantity = uint160(bound(startSeed, 1, 1e24));
+        uint160 maxQuantity = uint160(uint256(startQuantity) * 1_000);
+        DeepstateRewarderFactory.MarketConfig memory config = DeepstateRewarderFactory.MarketConfig({
+            stockToken: stockToken,
+            stockStartQuantity: startQuantity,
+            stockMaxQuantity: maxQuantity,
+            stockBuySideActive: true,
+            usdGBuySideActive: true
+        });
+
+        address expectedHook = mode == 3 ? FOREIGN_HOOK : (mode == 4 ? address(0) : address(predecessor));
+        address caller = _lifecycleCaller(callerSeed);
         bool authorized = caller == factory.owner();
         bool aligned = _governanceAligned();
         bool hasMinterRole = minterController.hasAnyRole(address(factory), minterController.MINTER_ROLE());
-        bool validLifecycle = active != address(0) && expectedRewarder == active
-            && factory.rewarderPool(active) == poolId && !factory.marketToppedUp(poolId)
-            && deepstate.poolHook(poolId) == active && !DeepstateRewarderV2(active).retired();
-        bool canMint = _canMint(factory.TOP_UP_FUNDING());
+        bool hasHookRole = v1Controller.hasAnyRole(address(factory), v1Controller.HOOK_MANAGER_ROLE());
+        bool routerOwned = deepstate.owner() == address(v1Controller);
+        bool canMint = _canMint(factory.MARKET_FUNDING());
         bool sablierWorking = !sablier.revertCreate();
 
-        FundingSnapshot memory before_ = _fundingSnapshot(stockToken);
+        DeploySnapshot memory before_ = _deploySnapshot(stockToken);
         vm.prank(caller);
-        (bool success,) = address(factory).call(abi.encodeCall(factory.topUpMarket, (stockToken, expectedRewarder)));
+        (bool success, bytes memory result) =
+            address(factory).call(abi.encodeCall(factory.migrateMarket, (config, expectedHook)));
 
         if (!success) {
-            _assertFailedFundingAtomic(before_, stockToken);
+            _assertFailedDeployAtomic(before_, stockToken);
             return;
         }
 
+        address rewarder = abi.decode(result, (address));
         if (!authorized) ++authorizationViolations;
         if (!aligned) ++governanceAlignmentViolations;
-        if (!hasMinterRole) ++delegatedRoleViolations;
-        if (!validLifecycle || modelToppedUp[stockToken] || modelRemoved[stockToken]) ++lifecycleViolations;
+        if (!hasMinterRole || !hasHookRole) ++delegatedRoleViolations;
+        if (!routerOwned) ++routerOwnershipViolations;
+        if (mode != 0 || before_.hook != address(predecessor)) ++migrationGuardViolations;
+        if (block.timestamp < before_.nextDeploymentAt) ++cooldownViolations;
+        if (before_.committed + factory.MARKET_FUNDING() > factory.fundingBudget()) ++budgetViolations;
+        if (before_.activeRewarder != address(0) || before_.marketDeployed || modelEverDeployed[stockToken]) {
+            ++lifecycleViolations;
+        }
         if (!canMint) ++mintWindowOrCapViolations;
         if (!sablierWorking) ++sablierDependencyViolations;
 
-        ++successfulTopUps;
+        ++successfulDeployments;
+        ++successfulMarketMigrations;
         ++successfulMintCalls;
-        totalVestingMinted += _vesting(factory.TOP_UP_FUNDING());
-        modelToppedUp[stockToken] = true;
-        _recordAndAssertFactoryStream(before_.nextStreamId, factory.TOP_UP_FUNDING());
+        totalVestingMinted += _vesting(factory.MARKET_FUNDING());
+        _successfulDeploymentTimestamps.push(block.timestamp);
+        _recordAndAssertFactoryStream(before_.nextStreamId, factory.MARKET_FUNDING());
 
-        assertEq(factory.initialFundingCommitted(), before_.committed);
-        assertEq(factory.nextDeploymentAt(), before_.nextDeploymentAt);
-        assertEq(deep.totalSupply(), before_.totalSupply + _combined(factory.TOP_UP_FUNDING()));
-        assertEq(minterController.grossIssued(), before_.grossIssued + _combined(factory.TOP_UP_FUNDING()));
+        modelEverDeployed[stockToken] = true;
+        modelRewarder[stockToken] = rewarder;
+        modelStartQuantity[stockToken] = startQuantity;
+        modelMaxQuantity[stockToken] = maxQuantity;
+        modelHookFlags[stockToken] = _ROUTER_HOOK_FLAGS;
+
+        assertEq(factory.fundingCommitted(), before_.committed + factory.MARKET_FUNDING());
+        assertEq(factory.nextDeploymentAt(), block.timestamp + factory.DEPLOYMENT_COOLDOWN());
+        assertEq(deep.totalSupply(), before_.totalSupply + _combined(factory.MARKET_FUNDING()));
+        assertEq(minterController.grossIssued(), before_.grossIssued + _combined(factory.MARKET_FUNDING()));
         assertEq(sablier.nextStreamId(), before_.nextStreamId + 1);
-        assertTrue(factory.marketToppedUp(poolId));
-        assertEq(deep.balanceOf(active), before_.rewarderBalance + factory.TOP_UP_FUNDING());
+        assertTrue(factory.marketDeployed(poolId));
+        assertEq(factory.activeRewarder(poolId), rewarder);
+        assertEq(factory.rewarderPool(rewarder), poolId);
+        assertEq(deepstate.poolHook(poolId), rewarder);
+        assertEq(deep.balanceOf(rewarder), factory.MARKET_FUNDING());
     }
 
-    function topUpExpectedActiveMarket(uint256 stockSeed) external {
-        this.attemptTopUp(stockSeed, 0, 0);
+    function migrateValidLegacyMarket(uint256 stockSeed, uint256 startSeed) external {
+        this.attemptMigrateLegacyMarket(stockSeed, startSeed, 0, 0);
     }
 
     function attemptRemove(uint256 stockSeed, uint8 callerSeed, uint8 expectedRewarderSeed) external {
@@ -372,7 +461,7 @@ contract DeepstateFactorySystemHandler is Test {
         modelRemoved[stockToken] = true;
         modelHookFlags[stockToken] = 0;
 
-        assertEq(factory.initialFundingCommitted(), before_.committed);
+        assertEq(factory.fundingCommitted(), before_.committed);
         assertEq(factory.nextDeploymentAt(), before_.nextDeploymentAt);
         assertEq(factory.activeRewarder(poolId), address(0));
         assertEq(factory.rewarderPool(active), bytes32(0));
@@ -400,17 +489,21 @@ contract DeepstateFactorySystemHandler is Test {
         if (hookSeed % 3 == 1) hook = FOREIGN_HOOK;
         else if (hookSeed % 3 == 2 && active != address(0)) hook = active;
 
+        _installExternalHook(stockToken, hook, hook != address(0), false);
+        modelHookFlags[stockToken] = hook == address(0) ? 0 : ROUTER_TOKEN0_ACTIVE_FLAG;
+        assertEq(routerHookFlags(stockToken), modelHookFlags[stockToken]);
+    }
+
+    function _installExternalHook(address stockToken, address hook, bool token0Active, bool token1Active) private {
         (address token0, address token1) = _sort(stockToken, address(usdG));
         if (deepstate.owner() == address(v1Controller)) {
             vm.prank(v1Controller.owner());
-            v1Controller.setPoolHookConfig(token0, token1, hook, hook != address(0), false);
+            v1Controller.setPoolHookConfig(token0, token1, hook, token0Active, token1Active);
         } else {
             address routerOwner = deepstate.owner();
             vm.prank(routerOwner);
-            deepstate.setPoolHookConfig(token0, token1, hook, hook != address(0), false);
+            deepstate.setPoolHookConfig(token0, token1, hook, token0Active, token1Active);
         }
-        modelHookFlags[stockToken] = hook == address(0) ? 0 : ROUTER_TOKEN0_ACTIVE_FLAG;
-        assertEq(routerHookFlags(stockToken), modelHookFlags[stockToken]);
     }
 
     function toggleMinterRole(bool enabled) external {
@@ -609,13 +702,13 @@ contract DeepstateFactorySystemHandler is Test {
         totalVestingMinted += _vesting(primaryAmount);
         assertLt(
             _mintHeadroom(),
-            _combined(factory.INITIAL_FUNDING()),
-            "headroom consumption must disable another initial funding mint"
+            _combined(factory.MARKET_FUNDING()),
+            "headroom consumption must disable another market funding mint"
         );
     }
 
     function _deploySnapshot(address stockToken) private view returns (DeploySnapshot memory snapshot) {
-        snapshot.committed = factory.initialFundingCommitted();
+        snapshot.committed = factory.fundingCommitted();
         snapshot.nextDeploymentAt = factory.nextDeploymentAt();
         snapshot.totalSupply = deep.totalSupply();
         snapshot.grossIssued = minterController.grossIssued();
@@ -627,12 +720,11 @@ contract DeepstateFactorySystemHandler is Test {
             snapshot.hook = deepstate.poolHook(snapshot.poolId);
             snapshot.routerPoolState = routerPoolState(stockToken);
             snapshot.marketDeployed = factory.marketDeployed(snapshot.poolId);
-            snapshot.toppedUp = factory.marketToppedUp(snapshot.poolId);
         }
     }
 
     function _fundingSnapshot(address stockToken) private view returns (FundingSnapshot memory snapshot) {
-        snapshot.committed = factory.initialFundingCommitted();
+        snapshot.committed = factory.fundingCommitted();
         snapshot.nextDeploymentAt = factory.nextDeploymentAt();
         snapshot.totalSupply = deep.totalSupply();
         snapshot.grossIssued = minterController.grossIssued();
@@ -643,7 +735,6 @@ contract DeepstateFactorySystemHandler is Test {
         snapshot.hook = deepstate.poolHook(snapshot.poolId);
         snapshot.routerPoolState = routerPoolState(stockToken);
         snapshot.marketDeployed = factory.marketDeployed(snapshot.poolId);
-        snapshot.toppedUp = factory.marketToppedUp(snapshot.poolId);
         if (snapshot.activeRewarder != address(0)) {
             snapshot.rewarderPool = factory.rewarderPool(snapshot.activeRewarder);
             snapshot.retiredRewarderPool = factory.retiredRewarderPool(snapshot.activeRewarder);
@@ -654,7 +745,7 @@ contract DeepstateFactorySystemHandler is Test {
     }
 
     function _assertFailedDeployAtomic(DeploySnapshot memory before_, address stockToken) private view {
-        assertEq(factory.initialFundingCommitted(), before_.committed);
+        assertEq(factory.fundingCommitted(), before_.committed);
         assertEq(factory.nextDeploymentAt(), before_.nextDeploymentAt);
         assertEq(deep.totalSupply(), before_.totalSupply);
         assertEq(minterController.grossIssued(), before_.grossIssued);
@@ -663,14 +754,13 @@ contract DeepstateFactorySystemHandler is Test {
         if (stockToken != address(0) && stockToken != address(usdG)) {
             assertEq(factory.activeRewarder(before_.poolId), before_.activeRewarder);
             assertEq(factory.marketDeployed(before_.poolId), before_.marketDeployed);
-            assertEq(factory.marketToppedUp(before_.poolId), before_.toppedUp);
             assertEq(deepstate.poolHook(before_.poolId), before_.hook);
             assertEq(routerPoolState(stockToken), before_.routerPoolState);
         }
     }
 
     function _assertFailedFundingAtomic(FundingSnapshot memory before_, address stockToken) private view {
-        assertEq(factory.initialFundingCommitted(), before_.committed);
+        assertEq(factory.fundingCommitted(), before_.committed);
         assertEq(factory.nextDeploymentAt(), before_.nextDeploymentAt);
         assertEq(deep.totalSupply(), before_.totalSupply);
         assertEq(minterController.grossIssued(), before_.grossIssued);
@@ -678,7 +768,6 @@ contract DeepstateFactorySystemHandler is Test {
         assertEq(deep.balanceOf(address(sablier)), before_.sablierBalance);
         assertEq(factory.activeRewarder(before_.poolId), before_.activeRewarder);
         assertEq(factory.marketDeployed(before_.poolId), before_.marketDeployed);
-        assertEq(factory.marketToppedUp(before_.poolId), before_.toppedUp);
         assertEq(deepstate.poolHook(before_.poolId), before_.hook);
         assertEq(routerPoolState(stockToken), before_.routerPoolState);
         assertEq(_poolId(stockToken), before_.poolId);
@@ -761,12 +850,6 @@ contract DeepstateFactorySystemHandler is Test {
         return UNAUTHORIZED;
     }
 
-    function _topUpCaller(uint8 callerSeed) private view returns (address) {
-        if (callerSeed % 3 == 0) return factory.owner();
-        if (callerSeed % 3 == 1 && factory.operator() != address(0)) return factory.operator();
-        return UNAUTHORIZED;
-    }
-
     function _governanceAligned() private view returns (bool) {
         address owner = factory.owner();
         return v1Controller.owner() == owner && minterController.owner() == owner;
@@ -823,8 +906,8 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         bytes4[] memory selectors = new bytes4[](21);
         selectors[0] = handler.attemptDeploy.selector;
         selectors[1] = handler.deployValidMarket.selector;
-        selectors[2] = handler.attemptTopUp.selector;
-        selectors[3] = handler.topUpExpectedActiveMarket.selector;
+        selectors[2] = handler.attemptMigrateLegacyMarket.selector;
+        selectors[3] = handler.migrateValidLegacyMarket.selector;
         selectors[4] = handler.attemptRemove.selector;
         selectors[5] = handler.removeExpectedActiveMarket.selector;
         selectors[6] = handler.configureExternalHook.selector;
@@ -854,6 +937,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.routerOwnershipViolations(), 0);
         assertEq(handler.mintWindowOrCapViolations(), 0);
         assertEq(handler.sablierDependencyViolations(), 0);
+        assertEq(handler.migrationGuardViolations(), 0);
     }
 
     function invariant_OnlyValidFreshMarketsDeployAtTheCooldownAndWithinBudget() public view {
@@ -863,8 +947,8 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.lifecycleViolations(), 0);
 
         DeepstateRewarderFactory factory = handler.factory();
-        assertEq(factory.initialFundingCommitted(), handler.successfulDeployments() * factory.INITIAL_FUNDING());
-        assertLe(factory.initialFundingCommitted(), factory.initialFundingBudget());
+        assertEq(factory.fundingCommitted(), handler.successfulDeployments() * factory.MARKET_FUNDING());
+        assertLe(factory.fundingCommitted(), factory.fundingBudget());
 
         uint256 deployments = handler.successfulDeployments();
         if (deployments == 0) {
@@ -896,7 +980,6 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
 
             assertEq(handler.routerHookFlags(stockToken), handler.modelHookFlags(stockToken));
             assertEq(factory.marketDeployed(poolId), everDeployed);
-            assertEq(factory.marketToppedUp(poolId), handler.modelToppedUp(stockToken));
 
             if (!everDeployed) {
                 assertEq(factory.activeRewarder(poolId), address(0));
@@ -941,30 +1024,24 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
                 assertEq(factory.retiredRewarderPool(rewarderAddress), bytes32(0));
                 assertFalse(rewarder.retired());
                 assertEq(rewarder.owner(), address(factory));
-                uint256 expectedFunding = factory.INITIAL_FUNDING();
-                if (handler.modelToppedUp(stockToken)) expectedFunding += factory.TOP_UP_FUNDING();
-                assertEq(deep.balanceOf(rewarderAddress), expectedFunding);
+                assertEq(deep.balanceOf(rewarderAddress), factory.MARKET_FUNDING());
+                assertEq(deep.balanceOf(rewarderAddress), uint256(factory.SIDE_EMISSION_CAP()) * 2);
             }
         }
     }
 
-    function invariant_TopUpsAreGovernanceOnlyOneShotAndDoNotConsumeTheLaunchBudget() public view {
-        assertLe(handler.successfulTopUps(), handler.successfulDeployments());
+    function invariant_MigrationsAreGovernanceOnlyAndConsumeTheSameLifetimeBudget() public view {
+        assertLe(handler.successfulMarketMigrations(), handler.successfulDeployments());
+        assertEq(handler.migrationGuardViolations(), 0);
         assertEq(
-            handler.factory().initialFundingCommitted(),
-            handler.successfulDeployments() * handler.factory().INITIAL_FUNDING()
+            handler.factory().fundingCommitted(), handler.successfulDeployments() * handler.factory().MARKET_FUNDING()
         );
-        for (uint256 i; i < handler.stockCount(); ++i) {
-            address stockToken = handler.stock(i);
-            if (handler.modelToppedUp(stockToken)) assertTrue(handler.modelEverDeployed(stockToken));
-        }
     }
 
     function invariant_RetirementNeverRestoresBudgetAndPermanentlyPreventsRedeployment() public view {
         assertLe(handler.successfulRemovals(), handler.successfulDeployments());
         assertEq(
-            handler.factory().initialFundingCommitted(),
-            handler.successfulDeployments() * handler.factory().INITIAL_FUNDING()
+            handler.factory().fundingCommitted(), handler.successfulDeployments() * handler.factory().MARKET_FUNDING()
         );
         for (uint256 i; i < handler.stockCount(); ++i) {
             address stockToken = handler.stock(i);
@@ -983,7 +1060,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(deep.totalSupply() + handler.totalRewarderFundingBurned(), minterController.grossIssued());
         assertEq(deep.balanceOf(address(handler.sablier())), handler.totalVestingMinted());
         assertEq(handler.sablier().nextStreamId(), handler.successfulMintCalls() + 1);
-        assertEq(handler.factoryStreamCount(), handler.successfulDeployments() + handler.successfulTopUps());
+        assertEq(handler.factoryStreamCount(), handler.successfulDeployments());
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(handler.factory())));
         assertTrue(deep.hasRole(deep.MINTER_ROLE(), address(minterController)));
         assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController)));
@@ -1000,14 +1077,13 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         DeepstateMinterController minterController = handler.minterController();
 
         assertEq(factory.DEPLOYMENT_COOLDOWN(), 3 days);
-        assertEq(factory.EMISSION_DURATION(), 395 days);
-        assertEq(factory.SIDE_EMISSION_CAP(), 500_000_000e18);
-        assertEq(factory.INITIAL_FUNDING(), 150_000_000e18);
-        assertEq(factory.TOP_UP_FUNDING(), 850_000_000e18);
+        assertEq(factory.EMISSION_DURATION(), 365 days);
+        assertEq(factory.SIDE_EMISSION_CAP(), 50_000_000e18);
+        assertEq(factory.MARKET_FUNDING(), 100_000_000e18);
         assertEq(factory.USDG_START_QUANTITY(), 1e6);
         assertEq(factory.USDG_MAX_QUANTITY(), 1_000_000e6);
         assertEq(factory.MAX_QUANTITY_GROWTH(), 1_000_000);
-        assertEq(factory.initialFundingBudget(), 1_500_000_000e18);
+        assertEq(factory.fundingBudget(), 1_000_000_000e18);
         assertEq(minterController.RECIPIENT_ALLOCATION_BPS(), 3_000);
         assertEq(minterController.PRIMARY_ALLOCATION_BPS(), 7_000);
         assertEq(minterController.VESTING_DURATION(), 365 days);
@@ -1021,7 +1097,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertTrue(operator == address(0) || operator == handler.OPERATOR_A() || operator == handler.OPERATOR_B());
     }
 
-    function test_Reachability_CompoundDeployTopUpRemoveAndPermanentRedeployRejection() public {
+    function test_Reachability_CompoundDeployRemoveAndPermanentRedeployRejection() public {
         address stockToken = handler.stock(0);
         bytes32 poolId = _poolId(stockToken, address(handler.usdG()));
 
@@ -1031,17 +1107,13 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertNotEq(rewarder, address(0));
         assertEq(handler.successfulDeployments(), 1);
         assertEq(handler.factoryStreamCount(), 1);
-        _assertFactoryStream(handler.factoryStreamId(0), 150_000_000e18);
+        _assertFactoryStream(handler.factoryStreamId(0), 100_000_000e18);
         uint256 expectedFlag = stockToken < address(handler.usdG())
             ? handler.ROUTER_TOKEN0_ACTIVE_FLAG()
             : handler.ROUTER_TOKEN1_ACTIVE_FLAG();
         assertEq(handler.routerHookFlags(stockToken), expectedFlag);
 
-        handler.topUpExpectedActiveMarket(0);
-        assertEq(handler.successfulTopUps(), 1);
-        assertEq(handler.factoryStreamCount(), 2);
-        _assertFactoryStream(handler.factoryStreamId(1), 850_000_000e18);
-        assertEq(handler.deep().balanceOf(rewarder), 1_000_000_000e18);
+        assertEq(handler.deep().balanceOf(rewarder), 100_000_000e18);
 
         handler.removeExpectedActiveMarket(0, true);
         assertEq(handler.successfulRemovals(), 1);
@@ -1103,7 +1175,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.successfulDeployments(), 2);
         assertNotEq(handler.factory().activeRewarder(nextPoolId), address(0));
         assertEq(handler.factoryStreamCount(), 2);
-        assertEq(handler.deep().balanceOf(address(handler.sablier())), 2 * (uint256(150_000_000e18) * 30 / 70));
+        assertEq(handler.deep().balanceOf(address(handler.sablier())), 2 * (uint256(100_000_000e18) * 30 / 70));
         assertEq(
             handler.factory().activeRewarder(_poolId(firstStock, address(handler.usdG()))),
             handler.modelRewarder(firstStock)
@@ -1163,34 +1235,49 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         // The unchanged operator and delegated permissions remain usable under the new owner.
         handler.deployValidMarket(0, 1e18, true);
         assertEq(handler.successfulDeployments(), 1);
-        handler.topUpExpectedActiveMarket(0);
-        assertEq(handler.successfulTopUps(), 1);
     }
 
-    function test_Reachability_TopUpAndRemovalGuardsExerciseEveryExpectedState() public {
+    function test_Reachability_MigrationGuardsAreAtomicAndOnlyGovernanceCanReplaceTheExactPredecessor() public {
+        address stockToken = handler.stock(0);
+        bytes32 poolId = _poolId(stockToken, address(handler.usdG()));
+
+        handler.attemptMigrateLegacyMarket(0, 1e18, 1, 0);
+        assertEq(handler.successfulDeployments(), 0);
+        assertEq(handler.successfulMarketMigrations(), 0);
+        assertNotEq(handler.deepstate().poolHook(poolId), address(0));
+
+        handler.attemptMigrateLegacyMarket(0, 1e18, 0, 3);
+        handler.attemptMigrateLegacyMarket(0, 1e18, 0, 1);
+        handler.attemptMigrateLegacyMarket(0, 1e18, 0, 2);
+        assertEq(handler.successfulDeployments(), 0);
+        assertEq(handler.factory().fundingCommitted(), 0);
+
+        handler.toggleSablierFailure(true);
+        handler.migrateValidLegacyMarket(0, 1e18);
+        assertEq(handler.successfulDeployments(), 0);
+        assertNotEq(handler.deepstate().poolHook(poolId), address(0));
+        handler.toggleSablierFailure(false);
+
+        handler.migrateValidLegacyMarket(0, 1e18);
+        address rewarder = handler.factory().activeRewarder(poolId);
+        assertEq(handler.successfulDeployments(), 1);
+        assertEq(handler.successfulMarketMigrations(), 1);
+        assertEq(handler.factory().fundingCommitted(), 100_000_000e18);
+        assertEq(handler.deepstate().poolHook(poolId), rewarder);
+        assertEq(handler.deep().balanceOf(rewarder), 100_000_000e18);
+        assertEq(handler.factoryStreamCount(), 1);
+    }
+
+    function test_Reachability_RemovalGuardsExerciseEveryExpectedState() public {
         address stockToken = handler.stock(0);
         bytes32 poolId = _poolId(stockToken, address(handler.usdG()));
         handler.deployValidMarket(0, 1e18, false);
         address rewarder = handler.factory().activeRewarder(poolId);
 
-        // Operator, wrong expected Rewarder, and replaced hook must all fail without funding.
-        handler.attemptTopUp(0, 1, 0);
-        handler.attemptTopUp(0, 0, 1);
-        handler.configureExternalHook(0, 1);
-        handler.topUpExpectedActiveMarket(0);
-        assertEq(handler.successfulTopUps(), 0);
-        assertEq(handler.deep().balanceOf(rewarder), 150_000_000e18);
-
-        handler.configureExternalHook(0, 2);
-        handler.topUpExpectedActiveMarket(0);
-        assertEq(handler.successfulTopUps(), 1);
-        assertEq(handler.deep().balanceOf(rewarder), 1_000_000_000e18);
-
-        // A second top-up and a removal naming the wrong Rewarder are rejected.
-        handler.topUpExpectedActiveMarket(0);
+        // A removal naming the wrong Rewarder is rejected without touching full market funding.
         handler.attemptRemove(0, 0, 1);
-        assertEq(handler.successfulTopUps(), 1);
         assertEq(handler.successfulRemovals(), 0);
+        assertEq(handler.deep().balanceOf(rewarder), 100_000_000e18);
 
         // A foreign hook blocks removal. A pre-cleared hook permits cleanup even after role revocation.
         handler.configureExternalHook(0, 1);
@@ -1226,7 +1313,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         expired.deployValidMarket(0, 1e18, false);
         assertEq(expired.successfulDeployments(), 0);
         assertEq(expired.deep().totalSupply(), expiredSupply);
-        assertEq(expired.factory().initialFundingCommitted(), 0);
+        assertEq(expired.factory().fundingCommitted(), 0);
         assertEq(expired.sablier().nextStreamId(), 1);
     }
 
@@ -1236,7 +1323,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
             assertEq(handler.successfulDeployments(), i + 1);
             handler.advanceToDeploymentBoundary();
         }
-        assertEq(handler.factory().initialFundingCommitted(), 1_500_000_000e18);
+        assertEq(handler.factory().fundingCommitted(), 1_000_000_000e18);
         assertEq(handler.factoryStreamCount(), 10);
 
         handler.deployValidMarket(10, 1e18, false);
@@ -1244,15 +1331,15 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
         assertEq(handler.factory().activeRewarder(_poolId(handler.stock(10), address(handler.usdG()))), address(0));
 
         handler.removeExpectedActiveMarket(0, false);
-        assertEq(handler.factory().initialFundingCommitted(), 1_500_000_000e18);
+        assertEq(handler.factory().fundingCommitted(), 1_000_000_000e18);
         handler.deployValidMarket(10, 1e18, false);
         assertEq(handler.successfulDeployments(), 10);
-        assertEq(handler.factory().initialFundingCommitted(), 1_500_000_000e18);
+        assertEq(handler.factory().fundingCommitted(), 1_000_000_000e18);
     }
 
     function _assertOnlyFirstMarketDeployed(bytes32 nextPoolId) private view {
         assertEq(handler.successfulDeployments(), 1);
-        assertEq(handler.factory().initialFundingCommitted(), 150_000_000e18);
+        assertEq(handler.factory().fundingCommitted(), 100_000_000e18);
         assertEq(handler.factory().activeRewarder(nextPoolId), address(0));
         assertFalse(handler.factory().marketDeployed(nextPoolId));
         assertEq(handler.factoryStreamCount(), 1);
@@ -1261,7 +1348,7 @@ contract DeepstateFactorySystemInvariantTest is StdInvariant, Test {
 
     function _assertNoMarketDeployment(address stockToken, bytes32 poolId) private view {
         assertEq(handler.successfulDeployments(), 0);
-        assertEq(handler.factory().initialFundingCommitted(), 0);
+        assertEq(handler.factory().fundingCommitted(), 0);
         assertEq(handler.factory().nextDeploymentAt(), 0);
         assertEq(handler.factoryStreamCount(), 0);
         assertEq(handler.sablier().nextStreamId(), 1);

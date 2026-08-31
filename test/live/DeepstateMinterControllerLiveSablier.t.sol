@@ -36,7 +36,7 @@ contract DeepstateMinterControllerLiveSablierTest is Test {
         );
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(controller));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        controller.lockTokenAdministration();
+        controller.activateTokenAdministration();
 
         SablierLockup lockup = SablierLockup(DeepstateAddresses.SABLIER_LOCKUP);
         uint256 expectedStreamId = lockup.nextStreamId();

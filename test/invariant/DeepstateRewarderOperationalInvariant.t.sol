@@ -79,8 +79,8 @@ contract DeepstateRewarderOperationalHandler is Test {
     address public constant TOKEN1 = address(0x2000);
     address public constant UNKNOWN_TOKEN = address(0x3000);
     address public constant CLAIMANT = address(0xA11CE);
-    uint96 public constant SIDE_CAP = 500_000_000e18;
-    uint32 public constant DURATION = 395 days;
+    uint96 public constant SIDE_CAP = 50_000_000e18;
+    uint32 public constant DURATION = 365 days;
     uint160 public constant TOKEN0_START = 1e18;
     uint160 public constant TOKEN0_MAX = 5_000e18;
     uint160 public constant TOKEN1_START = 1e6;
@@ -456,8 +456,8 @@ contract OperationalGasBurningHook is IHook {
 /// @dev Focused operational properties whose preconditions are clearer and stronger than randomly
 /// hoping a state machine reaches the exact multi-transaction lifecycle in the right order.
 contract DeepstateRewarderOperationalPropertyTest is Test {
-    uint96 internal constant SIDE_CAP = 500_000_000e18;
-    uint32 internal constant DURATION = 395 days;
+    uint96 internal constant SIDE_CAP = 50_000_000e18;
+    uint32 internal constant DURATION = 365 days;
     uint160 internal constant START_QUANTITY = 1e18;
     uint160 internal constant MAX_QUANTITY = 5_000e18;
     bytes32 internal constant BOOK_ID = keccak256("claim-book");

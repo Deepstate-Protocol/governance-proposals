@@ -10,9 +10,18 @@ library DeepstateAddresses {
     uint48 internal constant GOVERNANCE_START = 1_788_074_638;
 
     // Release policy, not protocol-discovered values. Changing any value creates a different CREATE2 deployment.
-    uint256 internal constant MINTER_LIVE_SUPPLY_CAP = 20_000_000_000e18;
-    uint256 internal constant MINTER_GROSS_ISSUANCE_CAP = 20_000_000_000e18;
-    uint256 internal constant FACTORY_INITIAL_PRIMARY_FUNDING_BUDGET = 1_500_000_000e18;
+    uint256 internal constant MINTER_LIVE_SUPPLY_CAP = 3_000_000_000e18;
+    uint256 internal constant MINTER_GROSS_ISSUANCE_CAP = 3_000_000_000e18;
+    uint256 internal constant FACTORY_LIFETIME_FUNDING_BUDGET = 1_000_000_000e18;
+    uint256 internal constant MINIMUM_ACTIVATION_ISSUANCE_HEADROOM = 442_857_142_857_142_857_142_857_142;
+
+    // Immutable configuration of the live predecessor Rewarder used by the one-time endowment snapshot and migration.
+    uint96 internal constant LEGACY_REWARDER_SIDE_EMISSION_CAP = 500_000_000e18;
+    uint32 internal constant LEGACY_REWARDER_EMISSION_DURATION = 34_128_000; // 395 days
+    uint160 internal constant LEGACY_USDG_START_QUANTITY = 1e6;
+    uint160 internal constant LEGACY_USDG_MAX_QUANTITY = 1_000_000e6;
+    uint160 internal constant LEGACY_NVDA_START_QUANTITY = 1e18;
+    uint160 internal constant LEGACY_NVDA_MAX_QUANTITY = 5_000e18;
 
     uint8 internal constant DEEP_DECIMALS = 18;
     uint8 internal constant STATE_DECIMALS = 18;
@@ -72,6 +81,7 @@ library DeepstateAddresses {
     bytes32 internal constant SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH =
         0xc5211d5df605d1fdc4c38436af79384daf89cbf7b6b39e1882b405c3bb04c107;
     address internal constant SABLIER_COMPTROLLER_ADMIN = 0xcB88fBf459000853F22a7296b23d163901BB385E;
+    address internal constant SABLIER_COMPTROLLER_ORACLE = 0x0000000000000000000000000000000000000000;
     string internal constant SABLIER_COMPTROLLER_VERSION = "v1.1";
     uint256 internal constant SABLIER_LOCKUP_MIN_FEE_USD = 0;
     uint256 internal constant SABLIER_MAX_FEE_USD = 10_000_000_000;
@@ -80,4 +90,19 @@ library DeepstateAddresses {
     address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     bytes32 internal constant CREATE2_DEPLOYER_CODEHASH =
         0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989;
+
+    // Deterministic Rewarder V2 system deployments. These addresses are fixed by the reviewed CREATE2 deployer,
+    // salts, init code, constructor arguments, compiler settings, and pinned dependency revisions.
+    address internal constant MINTER_CONTROLLER = 0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5;
+    bytes32 internal constant MINTER_CONTROLLER_CODEHASH =
+        0xaa7292db515a0de6a611bccd4f953a26e299c54adbad09920cb5630731d63dc5;
+    address internal constant DGP001_BOOTSTRAP = 0x46f59ca750D4781b882a8F92BE11F0b23f537932;
+    bytes32 internal constant DGP001_BOOTSTRAP_CODEHASH =
+        0x5dbd6a010679b3dc1de4c62cb6cbfad824276ff75cbc783695fe748d1b332282;
+    address internal constant V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
+    bytes32 internal constant V1_CONTROLLER_CODEHASH =
+        0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc;
+    address internal constant REWARDER_FACTORY = 0xFF9E7971aB6E7111BB2F0aDA57a8E2c1256c3f98;
+    bytes32 internal constant REWARDER_FACTORY_CODEHASH =
+        0x8839004510aeb49e9725d929193c8deb2fff5f0950b65fdd22c6fae4ded93049;
 }

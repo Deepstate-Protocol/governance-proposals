@@ -33,6 +33,7 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
     /// @notice Validates the live deployment, then submits the exact proposal payload.
     function run() public returns (uint256 submittedProposalId) {
         IDeepstateGovernor governor = _validatedGovernor();
+        _beforeSubmission();
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
             proposal();
         uint256 pinnedProposalId = _validatedProposalId(_proposalId(targets, values, calldatas, description));
@@ -52,6 +53,7 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
     /// @dev The caller supplies the sum of action values; the Governor's preexisting ETH balance is preserved.
     function execute() public returns (uint256 executedProposalId) {
         IDeepstateGovernor governor = _validatedGovernor();
+        _beforeExecution();
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
             proposal();
         uint256 pinnedProposalId = _validatedProposalId(_proposalId(targets, values, calldatas, description));
@@ -88,7 +90,9 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
         currentState = _verifiedProposal(governor, pinnedProposalId);
     }
 
-    /// @notice Reopens the executed proposal over RPC and verifies its durable live postconditions.
+    /// @notice Reopens the executed proposal over RPC and verifies its current live postconditions.
+    /// @dev Run immediately after execution. Later authorized governance or lifecycle operations may legitimately
+    /// change proposal-specific state and make exact initial postconditions fail.
     function verifyExecution() public view returns (uint256 pinnedProposalId) {
         IDeepstateGovernor governor = _validatedGovernor();
         pinnedProposalId = _validatedProposalId(proposalId());
@@ -116,7 +120,13 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
     /// @notice Returns the proposal ID reviewed and pinned in the concrete proposal script.
     function expectedProposalId() public pure virtual returns (uint256);
 
-    /// @dev Override to add proposal-specific live postcondition checks after execution.
+    /// @dev Override to enforce proposal-specific live conditions immediately before submission.
+    function _beforeSubmission() internal view virtual {}
+
+    /// @dev Override to enforce proposal-specific live conditions immediately before execution.
+    function _beforeExecution() internal view virtual {}
+
+    /// @dev Override to add proposal-specific immediate live postcondition checks after execution.
     function _afterExecution() internal view virtual {}
 
     /// @notice Performs read-only identity and launch checks against the configured live Governor.

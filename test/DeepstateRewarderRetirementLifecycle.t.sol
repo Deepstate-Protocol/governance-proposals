@@ -20,8 +20,31 @@ contract LifecycleUSDG is RewardTestERC20 {
     }
 }
 
+contract LifecycleLegacyRewarderMock {
+    address public immutable deepstate;
+    address public immutable rewardToken;
+    address public constant token0 = address(0x1000);
+    address public constant token1 = address(0x2000);
+    bytes32 public immutable poolId;
+
+    constructor(address deepstate_, address rewardToken_) {
+        deepstate = deepstate_;
+        rewardToken = rewardToken_;
+        poolId = keccak256(abi.encode(token0, token1));
+    }
+
+    function totalAccrued(address token) external pure returns (uint96) {
+        return token == token0 || token == token1 ? 2 : 0;
+    }
+
+    function rewardees(address token) external pure returns (uint32 orderNonce, uint64 startedAt) {
+        require(token == token0 || token == token1, "invalid token");
+        return (0, 0);
+    }
+}
+
 contract DeepstateRewarderRetirementLifecycleTest is Test {
-    uint256 internal constant MINT_CAP = 20_000_000_000e18;
+    uint256 internal constant MINT_CAP = 3_000_000_000e18;
 
     RewardTestERC20 internal token0;
     RewardTestERC20 internal token1;
@@ -31,6 +54,7 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
     DeepstateToken internal deep;
     DeepstateV1Controller internal deepstateV1Controller;
     DeepstateMinterController internal minterController;
+    LifecycleLegacyRewarderMock internal legacyRewarder;
     DeepstateRewarderFactory internal factory;
     MockSablierLockupLinearV4 internal sablier;
 
@@ -50,19 +74,22 @@ contract DeepstateRewarderRetirementLifecycleTest is Test {
 
         deepstate = new RewardDeepstateHarness();
         deep = new DeepstateToken(address(this), "Deepstate", "DEEP");
+        legacyRewarder = new LifecycleLegacyRewarderMock(address(deepstate), address(deep));
         sablier = new MockSablierLockupLinearV4();
         deepstateV1Controller = new DeepstateV1Controller(address(this), address(deepstate));
         minterController = new DeepstateMinterController(
             address(this), address(deep), address(sablier), vestingRecipient, MINT_CAP, MINT_CAP
         );
         factory = new DeepstateRewarderFactory(
-            address(this), address(deepstateV1Controller), address(minterController), address(usdG), 1_500_000_000e18
+            address(this), address(deepstateV1Controller), address(minterController), address(usdG), 1_000_000_000e18
         );
 
-        deep.grantRole(deep.MINTER_ROLE(), address(minterController));
+        deepstate.setPoolHookConfig(
+            legacyRewarder.token0(), legacyRewarder.token1(), address(legacyRewarder), true, true
+        );
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
+        minterController.activateTokenAdministration();
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
 
         deepstate.transferOwnership(address(deepstateV1Controller));

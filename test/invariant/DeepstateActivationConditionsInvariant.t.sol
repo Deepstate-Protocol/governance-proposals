@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Lockup} from "@sablier/lockup/src/types/Lockup.sol";
-import {LockupLinear} from "@sablier/lockup/src/types/LockupLinear.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
+import {DGP001Bootstrap} from "../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../src/DeepstateMinterController.sol";
 import {DeepstateRewarderFactory} from "../../src/DeepstateRewarderFactory.sol";
+import {DeepstateRewarderV2} from "../../src/DeepstateRewarderV2.sol";
 import {DeepstateV1Controller} from "../../src/DeepstateV1Controller.sol";
 import {MockSablierLockupLinearV4} from "../mocks/MockSablierLockupLinearV4.sol";
 
@@ -39,19 +38,58 @@ contract ActivationConditionsToken is ERC20 {
     }
 }
 
-/// @dev Local execution model for the exact three dictated governance transitions. This is not a substitute for the
+/// @dev Immutable identity and controllable accrued totals needed to model the deployed V1 Rewarder at an idle handoff.
+contract ActivationLegacyRewarder {
+    address public immutable deepstate;
+    address public immutable rewardToken;
+    bytes32 public immutable poolId;
+    address public immutable token0;
+    address public immutable token1;
+
+    mapping(address token => uint96 accrued) public totalAccrued;
+
+    constructor(
+        address deepstate_,
+        address rewardToken_,
+        bytes32 poolId_,
+        address token0_,
+        address token1_,
+        uint96 token0Accrued_,
+        uint96 token1Accrued_
+    ) {
+        deepstate = deepstate_;
+        rewardToken = rewardToken_;
+        poolId = poolId_;
+        token0 = token0_;
+        token1 = token1_;
+        totalAccrued[token0_] = token0Accrued_;
+        totalAccrued[token1_] = token1Accrued_;
+    }
+
+    function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt) {
+        require(token == token0 || token == token1, "invalid token");
+        return (0, 0);
+    }
+}
+
+/// @dev Local execution model for the two dictated governance transitions. This is not a substitute for the
 /// eventual pinned archive-fork proposal tests: it proves that the intended ordered calls compose against the current
 /// contracts and that the resulting authority/economic state resists unauthorized calls.
 contract DeepstateActivationConditionsHandler is Test {
     uint256 public constant EXISTING_REWARDER_ALLOCATION = 1_000_000_000e18;
-    uint256 public constant ENDOWMENT = 300_000_000e18;
+    uint96 public constant LEGACY_TOKEN0_ACCRUED = 76_668_471_827185259478605328;
+    uint96 public constant LEGACY_TOKEN1_ACCRUED = 71_607_902_174090642172829949;
+    uint256 public constant ENDOWMENT = (uint256(LEGACY_TOKEN0_ACCRUED) + uint256(LEGACY_TOKEN1_ACCRUED)) * 30 / 100;
     uint256 public constant VOLUNTEER_PRIMARY = 10_000_000e18;
     uint256 public constant VOLUNTEER_A_AMOUNT = 3_333_333_333333333333333334;
     uint256 public constant VOLUNTEER_B_AMOUNT = 3_333_333_333333333333333333;
     uint256 public constant VOLUNTEER_C_AMOUNT = 3_333_333_333333333333333333;
-    uint256 public constant VOLUNTEER_VESTING = 4_285_714_285714285714285714;
-    uint256 public constant LIVE_AND_GROSS_CAP = 20_000_000_000e18;
-    uint256 public constant INITIAL_FACTORY_BUDGET = 1_500_000_000e18;
+    uint256 public constant VOLUNTEER_STREAM_VESTING = 1_428_571_428571428571428571;
+    uint256 public constant VOLUNTEER_VESTING = 3 * VOLUNTEER_STREAM_VESTING;
+    uint256 public constant MARKET_PRIMARY = 100_000_000e18;
+    uint256 public constant MARKET_VESTING = 42_857_142_857142857142857142;
+    uint256 public constant LIVE_AND_GROSS_CAP = 3_000_000_000e18;
+    uint256 public constant FACTORY_FUNDING_BUDGET = 1_000_000_000e18;
     uint256 public constant LEGACY_POOL_HOOK_FLAGS = (uint256(1) << 254) | (uint256(1) << 255);
     uint256 internal constant _POOL_STATE_MAPPING_SLOT = 2;
 
@@ -60,22 +98,25 @@ contract DeepstateActivationConditionsHandler is Test {
     address public constant VOLUNTEER_B = 0x5715d61f99487abD65D1091b5d3a46c1b2879355;
     address public constant VOLUNTEER_C = 0xEb01dF2A97A966f96B1765c78ccD97f3412765F0;
     address public constant FEE_RECIPIENT = address(0xFEE);
-    address public constant LEGACY_TOKEN0 = address(0x1000);
-    address public constant LEGACY_TOKEN1 = address(0x2000);
-    address public constant LEGACY_HOOK = address(0x3000);
     address public constant LEGACY_BYPASS_MINTER = address(0x4000);
     address public constant OUTSIDER = address(0x5000);
 
     DeepstateToken public immutable deep;
     MockSablierLockupLinearV4 public immutable sablier;
     DeepstateV1 public immutable router;
+    DGP001Bootstrap public immutable bootstrap;
     DeepstateMinterController public immutable minterController;
     DeepstateV1Controller public immutable v1Controller;
     DeepstateRewarderFactory public immutable factory;
     ActivationConditionsToken public immutable usdG;
+    ActivationConditionsToken public immutable stock;
+    ActivationLegacyRewarder public immutable legacyRewarder;
 
     bytes32 public immutable legacyPoolId;
     bytes32 public immutable legacyPoolStateSlot;
+    address public immutable legacyToken0;
+    address public immutable legacyToken1;
+    address public immutable rewarderV2;
     uint40 public immutable administrationEndsAt;
     uint256 public unauthorizedAttempts;
     bool public unauthorizedMutation;
@@ -86,29 +127,39 @@ contract DeepstateActivationConditionsHandler is Test {
         sablier = new MockSablierLockupLinearV4();
         router = new DeepstateV1();
         usdG = new ActivationConditionsToken("USDG", "USDG", 6);
+        stock = new ActivationConditionsToken("NVIDIA", "NVDA", 18);
+
+        (address token0, address token1) =
+            address(usdG) < address(stock) ? (address(usdG), address(stock)) : (address(stock), address(usdG));
+        legacyToken0 = token0;
+        legacyToken1 = token1;
+        bytes32 poolId = router.poolId(token0, token1);
+        legacyPoolId = poolId;
+        legacyPoolStateSlot = keccak256(abi.encode(poolId, _POOL_STATE_MAPPING_SLOT));
+        legacyRewarder = new ActivationLegacyRewarder(
+            address(router), address(deep), poolId, token0, token1, LEGACY_TOKEN0_ACCRUED, LEGACY_TOKEN1_ACCRUED
+        );
 
         // Model the live one-billion-DEEP Rewarder allocation before deploying or activating the Minter Controller.
-        // The existing Rewarder is also the legacy Router hook whose configuration activation must preserve.
+        // The existing Rewarder remains funded after its exact hook is atomically replaced.
         deep.grantRole(deep.MINTER_ROLE(), address(this));
-        deep.mint(LEGACY_HOOK, EXISTING_REWARDER_ALLOCATION);
+        deep.mint(address(legacyRewarder), EXISTING_REWARDER_ALLOCATION);
 
         minterController = new DeepstateMinterController(
             address(this), address(deep), address(sablier), INC_SAFE, LIVE_AND_GROSS_CAP, LIVE_AND_GROSS_CAP
         );
+        bootstrap = new DGP001Bootstrap(address(this), address(minterController), address(legacyRewarder));
         v1Controller = new DeepstateV1Controller(address(this), address(router));
         factory = new DeepstateRewarderFactory(
-            address(this), address(v1Controller), address(minterController), address(usdG), INITIAL_FACTORY_BUDGET
+            address(this), address(v1Controller), address(minterController), address(usdG), FACTORY_FUNDING_BUDGET
         );
 
         router.setFeeConfig(FEE_RECIPIENT, 10);
-        router.setPoolHookConfig(LEGACY_TOKEN0, LEGACY_TOKEN1, LEGACY_HOOK, true, true);
-        legacyPoolId = router.poolId(LEGACY_TOKEN0, LEGACY_TOKEN1);
-        legacyPoolStateSlot = keccak256(abi.encode(legacyPoolId, _POOL_STATE_MAPPING_SLOT));
+        router.setPoolHookConfig(token0, token1, address(legacyRewarder), true, true);
 
-        _executeEndowmentAndLock();
+        rewarderV2 = _executeCombinedActivation();
         administrationEndsAt = minterController.tokenAdministrationEndsAt();
         _executeVolunteerAllocation();
-        _executeFactoryActivation();
     }
 
     function attemptDirectTokenMint(uint8 actorSeed, uint128 amountSeed) external {
@@ -140,7 +191,7 @@ contract DeepstateActivationConditionsHandler is Test {
             actor,
             address(v1Controller),
             abi.encodeCall(
-                DeepstateV1Controller.setPoolHookConfig, (LEGACY_TOKEN0, LEGACY_TOKEN1, address(0), false, false)
+                DeepstateV1Controller.setPoolHookConfig, (legacyToken0, legacyToken1, address(0), false, false)
             )
         );
     }
@@ -150,7 +201,7 @@ contract DeepstateActivationConditionsHandler is Test {
         _assertFailedWithoutMutation(
             actor,
             address(router),
-            abi.encodeCall(DeepstateV1.setPoolHookConfig, (LEGACY_TOKEN0, LEGACY_TOKEN1, address(0), false, false))
+            abi.encodeCall(DeepstateV1.setPoolHookConfig, (legacyToken0, legacyToken1, address(0), false, false))
         );
     }
 
@@ -193,49 +244,45 @@ contract DeepstateActivationConditionsHandler is Test {
         );
     }
 
-    function _executeEndowmentAndLock() internal {
+    function _executeCombinedActivation() internal returns (address deployedRewarder) {
         bytes32 tokenMinterRole = deep.MINTER_ROLE();
         deep.grantRole(tokenMinterRole, LEGACY_BYPASS_MINTER);
-        deep.mint(address(this), ENDOWMENT);
-        deep.approve(address(sablier), ENDOWMENT);
-        sablier.createWithDurationsLL(
-            Lockup.CreateWithDurations({
-                sender: address(this),
-                recipient: INC_SAFE,
-                // ENDOWMENT is a fixed 300 million 18-decimal amount and therefore fits in uint128.
-                // forge-lint: disable-next-line(unsafe-typecast)
-                depositAmount: uint128(ENDOWMENT),
-                token: IERC20(address(deep)),
-                cancelable: false,
-                transferable: false,
-                shape: "Deepstate Inc endowment"
-            }),
-            LockupLinear.UnlockAmounts({start: 0, cliff: 0}),
-            0,
-            LockupLinear.Durations({cliff: 0, total: 365 days})
-        );
 
-        // Every bypass is removed before governance gives up administration; the lock call is intentionally last.
+        // Model the verified pre-proposal baseline: no legacy token minters remain. The only additional token minter
+        // introduced by DGP-001 is the one-use Bootstrap, which renounces the role during `execute`.
         deep.revokeRole(tokenMinterRole, address(this));
         deep.revokeRole(tokenMinterRole, LEGACY_BYPASS_MINTER);
+        deep.grantRole(tokenMinterRole, address(bootstrap));
+        bootstrap.execute();
+        assertEq(bootstrap.endowmentAmount(), ENDOWMENT);
+        assertFalse(deep.hasRole(tokenMinterRole, address(bootstrap)));
+
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
-        minterController.lockTokenAdministration();
-    }
+        minterController.activateTokenAdministration();
 
-    function _executeVolunteerAllocation() internal {
-        minterController.mint(address(this), VOLUNTEER_PRIMARY);
-        assertEq(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT, VOLUNTEER_PRIMARY);
-        assertTrue(deep.transfer(VOLUNTEER_A, VOLUNTEER_A_AMOUNT));
-        assertTrue(deep.transfer(VOLUNTEER_B, VOLUNTEER_B_AMOUNT));
-        assertTrue(deep.transfer(VOLUNTEER_C, VOLUNTEER_C_AMOUNT));
-    }
-
-    function _executeFactoryActivation() internal {
         minterController.grantRoles(address(factory), minterController.MINTER_ROLE());
         router.transferOwnership(address(v1Controller));
         v1Controller.grantRoles(address(factory), v1Controller.HOOK_MANAGER_ROLE());
+        DeepstateRewarderV2 migrated = factory.migrateMarket(
+            DeepstateRewarderFactory.MarketConfig({
+                stockToken: address(stock),
+                stockStartQuantity: 1e18,
+                stockMaxQuantity: 5_000e18,
+                stockBuySideActive: true,
+                usdGBuySideActive: true
+            }),
+            address(legacyRewarder)
+        );
         factory.setOperator(INC_SAFE);
+        deployedRewarder = address(migrated);
+    }
+
+    function _executeVolunteerAllocation() internal {
+        assertEq(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT, VOLUNTEER_PRIMARY);
+        minterController.mint(VOLUNTEER_A, VOLUNTEER_A_AMOUNT);
+        minterController.mint(VOLUNTEER_B, VOLUNTEER_B_AMOUNT);
+        minterController.mint(VOLUNTEER_C, VOLUNTEER_C_AMOUNT);
     }
 
     function _assertFailedWithoutMutation(address actor, address target, bytes memory callData) internal {
@@ -248,7 +295,7 @@ contract DeepstateActivationConditionsHandler is Test {
         address operatorBefore = factory.operator();
         address routerOwnerBefore = router.owner();
         bytes32 legacyPoolStateBefore = vm.load(address(router), legacyPoolStateSlot);
-        uint256 existingRewarderBalanceBefore = deep.balanceOf(LEGACY_HOOK);
+        uint256 existingRewarderBalanceBefore = deep.balanceOf(address(legacyRewarder));
         (address feeRecipientBefore, uint16 feeBpsBefore) = router.feeConfig();
 
         vm.prank(actor);
@@ -262,7 +309,7 @@ contract DeepstateActivationConditionsHandler is Test {
         if (factory.operator() != operatorBefore) unauthorizedMutation = true;
         if (router.owner() != routerOwnerBefore) unauthorizedMutation = true;
         if (vm.load(address(router), legacyPoolStateSlot) != legacyPoolStateBefore) unauthorizedMutation = true;
-        if (deep.balanceOf(LEGACY_HOOK) != existingRewarderBalanceBefore) unauthorizedMutation = true;
+        if (deep.balanceOf(address(legacyRewarder)) != existingRewarderBalanceBefore) unauthorizedMutation = true;
         (address feeRecipientAfter, uint16 feeBpsAfter) = router.feeConfig();
         if (feeRecipientAfter != feeRecipientBefore || feeBpsAfter != feeBpsBefore) unauthorizedMutation = true;
     }
@@ -311,32 +358,59 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
 
     function invariant_ExactEndowmentAndVolunteerEconomicsRemainTrue() public view {
         assertFalse(handler.unauthorizedMutation());
-        assertEq(sablier.nextStreamId(), 3);
-        assertEq(handler.ENDOWMENT() * 100, handler.EXISTING_REWARDER_ALLOCATION() * 30);
+        assertEq(sablier.nextStreamId(), 6);
+        assertEq(
+            handler.ENDOWMENT(),
+            (uint256(handler.LEGACY_TOKEN0_ACCRUED()) + uint256(handler.LEGACY_TOKEN1_ACCRUED())) * 30 / 100
+        );
 
         MockSablierLockupLinearV4.Stream memory endowment = sablier.stream(1);
-        _assertLinearStream(endowment, address(handler), handler.ENDOWMENT(), "Deepstate Inc endowment");
-        MockSablierLockupLinearV4.Stream memory volunteerVesting = sablier.stream(2);
+        _assertLinearStream(endowment, address(handler.bootstrap()), handler.ENDOWMENT(), "Deepstate Inc endowment", 1);
+        MockSablierLockupLinearV4.Stream memory marketVesting = sablier.stream(2);
         _assertLinearStream(
-            volunteerVesting, address(minterController), handler.VOLUNTEER_VESTING(), "Deepstate allocation"
+            marketVesting, address(minterController), handler.MARKET_VESTING(), "Deepstate allocation", 0
         );
+        for (uint256 streamId = 3; streamId <= 5; ++streamId) {
+            MockSablierLockupLinearV4.Stream memory volunteerVesting = sablier.stream(streamId);
+            _assertLinearStream(
+                volunteerVesting,
+                address(minterController),
+                handler.VOLUNTEER_STREAM_VESTING(),
+                "Deepstate allocation",
+                0
+            );
+        }
 
         assertEq(deep.balanceOf(handler.VOLUNTEER_A()), handler.VOLUNTEER_A_AMOUNT());
         assertEq(deep.balanceOf(handler.VOLUNTEER_B()), handler.VOLUNTEER_B_AMOUNT());
         assertEq(deep.balanceOf(handler.VOLUNTEER_C()), handler.VOLUNTEER_C_AMOUNT());
-        assertEq(deep.balanceOf(handler.LEGACY_HOOK()), handler.EXISTING_REWARDER_ALLOCATION());
+        assertEq(deep.balanceOf(address(handler.legacyRewarder())), handler.EXISTING_REWARDER_ALLOCATION());
+        assertEq(deep.balanceOf(handler.rewarderV2()), handler.MARKET_PRIMARY());
         assertEq(deep.balanceOf(address(handler)), 0);
+        assertEq(deep.balanceOf(address(handler.bootstrap())), 0);
         assertEq(deep.balanceOf(address(minterController)), 0);
+        assertEq(deep.allowance(address(handler.bootstrap()), address(sablier)), 0);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
-        assertEq(deep.balanceOf(address(sablier)), handler.ENDOWMENT() + handler.VOLUNTEER_VESTING());
-        uint256 expectedSupply = handler.EXISTING_REWARDER_ALLOCATION() + handler.ENDOWMENT()
-            + handler.VOLUNTEER_PRIMARY() + handler.VOLUNTEER_VESTING();
+        assertEq(
+            deep.balanceOf(address(sablier)),
+            handler.ENDOWMENT() + handler.MARKET_VESTING() + handler.VOLUNTEER_VESTING()
+        );
+        uint256 expectedSupply = handler.EXISTING_REWARDER_ALLOCATION() + handler.ENDOWMENT() + handler.MARKET_PRIMARY()
+            + handler.MARKET_VESTING() + handler.VOLUNTEER_PRIMARY() + handler.VOLUNTEER_VESTING();
         assertEq(deep.totalSupply(), expectedSupply);
-        assertEq(minterController.grossIssued(), handler.VOLUNTEER_PRIMARY() + handler.VOLUNTEER_VESTING());
+        uint256 expectedGross = expectedSupply;
+        assertEq(minterController.grossIssued(), expectedGross);
+        DGP001Bootstrap bootstrap = handler.bootstrap();
+        assertTrue(bootstrap.executed());
+        assertEq(bootstrap.token0Accrued(), handler.LEGACY_TOKEN0_ACCRUED());
+        assertEq(bootstrap.token1Accrued(), handler.LEGACY_TOKEN1_ACCRUED());
+        assertEq(bootstrap.endowmentAmount(), handler.ENDOWMENT());
+        assertEq(bootstrap.streamId(), 1);
+        assertEq(bootstrap.postEndowmentSupply(), handler.EXISTING_REWARDER_ALLOCATION() + handler.ENDOWMENT());
         assertEq(minterController.mintCap() - deep.totalSupply(), handler.LIVE_AND_GROSS_CAP() - expectedSupply);
         assertEq(
             minterController.grossIssuanceCap() - minterController.grossIssued(),
-            handler.LIVE_AND_GROSS_CAP() - handler.VOLUNTEER_PRIMARY() - handler.VOLUNTEER_VESTING()
+            handler.LIVE_AND_GROSS_CAP() - expectedGross
         );
     }
 
@@ -351,20 +425,44 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(handler)));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(handler)));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(factory)));
+        assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(handler.bootstrap())));
+        assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(handler.bootstrap())));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), handler.LEGACY_BYPASS_MINTER()));
 
         assertEq(minterController.rolesOf(address(factory)), minterController.MINTER_ROLE());
         assertEq(v1Controller.rolesOf(address(factory)), v1Controller.HOOK_MANAGER_ROLE());
         assertEq(factory.operator(), handler.INC_SAFE());
         assertEq(router.owner(), address(v1Controller));
-        assertEq(router.poolHook(handler.legacyPoolId()), handler.LEGACY_HOOK());
+        assertEq(router.poolHook(handler.legacyPoolId()), handler.rewarderV2());
         assertEq(uint256(vm.load(address(router), handler.legacyPoolStateSlot())), handler.LEGACY_POOL_HOOK_FLAGS());
         (address feeRecipient, uint16 feeBps) = router.feeConfig();
         assertEq(feeRecipient, handler.FEE_RECIPIENT());
         assertEq(feeBps, 10);
 
-        assertEq(factory.initialFundingCommitted(), 0);
-        assertEq(factory.nextDeploymentAt(), 0);
+        assertEq(factory.fundingBudget(), handler.FACTORY_FUNDING_BUDGET());
+        assertEq(factory.fundingCommitted(), handler.MARKET_PRIMARY());
+        assertEq(factory.nextDeploymentAt(), 1_000_000 + 3 days);
+        assertEq(factory.activeRewarder(handler.legacyPoolId()), handler.rewarderV2());
+        assertEq(factory.rewarderPool(handler.rewarderV2()), handler.legacyPoolId());
+        assertTrue(factory.marketDeployed(handler.legacyPoolId()));
+        DeepstateRewarderV2 migrated = DeepstateRewarderV2(handler.rewarderV2());
+        assertEq(migrated.owner(), address(factory));
+        assertEq(migrated.sideEmissionCap(), 50_000_000e18);
+        assertEq(migrated.emissionDuration(), 365 days);
+        assertEq(migrated.token0(), handler.legacyToken0());
+        assertEq(migrated.token1(), handler.legacyToken1());
+        assertEq(deep.balanceOf(address(handler.legacyRewarder())), handler.EXISTING_REWARDER_ALLOCATION());
+        bytes32 activeBookId = router.activeBookId(handler.legacyToken0(), handler.legacyToken1());
+        (uint32 bidNonce, uint160 bidAmount) = router.topOrder(activeBookId, true);
+        (uint32 askNonce, uint160 askAmount) = router.topOrder(activeBookId, false);
+        assertEq(bidNonce, 0);
+        assertEq(bidAmount, 0);
+        assertEq(askNonce, 0);
+        assertEq(askAmount, 0);
+        (uint32 token0Cursor,) = handler.legacyRewarder().rewardees(handler.legacyToken0());
+        (uint32 token1Cursor,) = handler.legacyRewarder().rewardees(handler.legacyToken1());
+        assertEq(token0Cursor, 0);
+        assertEq(token1Cursor, 0);
         assertEq(minterController.tokenAdministrationEndsAt(), handler.administrationEndsAt());
         assertLt(block.timestamp, handler.administrationEndsAt());
     }
@@ -396,7 +494,8 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
                 deep.totalSupply(),
                 minterController.grossIssued(),
                 sablier.nextStreamId(),
-                deep.balanceOf(handler.LEGACY_HOOK()),
+                deep.balanceOf(address(handler.legacyRewarder())),
+                deep.balanceOf(handler.rewarderV2()),
                 deep.balanceOf(handler.VOLUNTEER_A()),
                 deep.balanceOf(handler.VOLUNTEER_B()),
                 deep.balanceOf(handler.VOLUNTEER_C()),
@@ -407,6 +506,8 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
                 router.owner(),
                 router.poolHook(handler.legacyPoolId()),
                 vm.load(address(router), handler.legacyPoolStateSlot()),
+                factory.fundingCommitted(),
+                factory.nextDeploymentAt(),
                 feeRecipient,
                 feeBps,
                 minterController.tokenAdministrationEndsAt()
@@ -418,7 +519,8 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         MockSablierLockupLinearV4.Stream memory stream,
         address expectedFunder,
         uint256 expectedAmount,
-        string memory expectedShape
+        string memory expectedShape,
+        uint40 expectedGranularity
     ) internal view {
         assertEq(stream.funder, expectedFunder);
         assertEq(stream.sender, expectedFunder);
@@ -430,7 +532,7 @@ contract DeepstateActivationConditionsInvariantTest is StdInvariant, Test {
         assertEq(keccak256(bytes(stream.shape)), keccak256(bytes(expectedShape)));
         assertEq(stream.startUnlockAmount, 0);
         assertEq(stream.cliffUnlockAmount, 0);
-        assertEq(stream.granularity, 0);
+        assertEq(stream.granularity, expectedGranularity);
         assertEq(stream.cliffDuration, 0);
         assertEq(stream.totalDuration, 365 days);
     }
