@@ -27,15 +27,19 @@ contract OfflineDeploymentDeepMock {
     }
 }
 
-contract OfflineDeploymentUSDGMock {
-    function decimals() external pure returns (uint8) {
-        return 6;
-    }
-}
-
 contract OfflineDeploymentLegacyRewarderMock {
-    function rewardToken() external pure returns (address) {
-        return DeepstateAddresses.DEEP;
+    function token0() external pure returns (address) {
+        return DeepstateAddresses.USDG;
+    }
+
+    function token1() external pure returns (address) {
+        return DeepstateAddresses.NVDA;
+    }
+
+    function totalAccrued(address token) external pure returns (uint96) {
+        if (token == DeepstateAddresses.USDG) return 700e18;
+        if (token == DeepstateAddresses.NVDA) return 300e18;
+        return 0;
     }
 }
 
@@ -71,7 +75,7 @@ contract DeployRewarderV2SystemInvariantHarness is DeployRewarderV2System {
 
     function verifyBootstrapFromPlan() external view {
         DeploymentPlan memory plan = _plan();
-        _verifyBootstrap(plan.dgp001Bootstrap, plan.minterController);
+        _verifyBootstrap(plan.dgp001Bootstrap);
     }
 
     function verifyV1FromPlan() external view {
@@ -124,14 +128,12 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 
         OfflineDeploymentCodeMock codeMock = new OfflineDeploymentCodeMock();
         OfflineDeploymentDeepMock deepMock = new OfflineDeploymentDeepMock();
-        OfflineDeploymentUSDGMock usdGMock = new OfflineDeploymentUSDGMock();
         OfflineDeploymentLegacyRewarderMock legacyRewarderMock = new OfflineDeploymentLegacyRewarderMock();
 
         vm.etch(DeepstateAddresses.DEEP, address(deepMock).code);
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.ROUTER, address(codeMock).code);
         vm.etch(DeepstateAddresses.REWARDER, address(legacyRewarderMock).code);
-        vm.etch(DeepstateAddresses.USDG, address(usdGMock).code);
         vm.etch(DeepstateAddresses.CREATE2_DEPLOYER, CREATE2_PROXY_RUNTIME);
     }
 
@@ -141,11 +143,7 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
             _deployMinterRecorded();
         } else if (component % 4 == 1) {
             ++bootstrapAttempts;
-            // The Bootstrap derives and pins its configuration from the Minter Controller at construction, so this
-            // attempt fails closed until the planned Minter exists.
-            vm.record();
-            try deployment.deployBootstrapFromPlan() {} catch {}
-            _recordExternalProtocolWrites();
+            _deployBootstrapRecorded();
         } else if (component % 4 == 2) {
             ++v1Attempts;
             _deployV1Recorded();
@@ -295,42 +293,20 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         }
     }
 
-    function invariant_BootstrapCanExistOnlyAfterItsMinterControllerDependency() public view {
-        if (EXPECTED_BOOTSTRAP.code.length != 0) assertGt(EXPECTED_MINTER.code.length, 0);
-    }
-
     function invariant_DeploymentNeverActivatesGovernancePermissionsOrMutableState() public view {
         assertFalse(handler.externalProtocolWriteViolation());
 
         if (EXPECTED_MINTER.code.length != 0) {
             DeepstateMinterController minter = DeepstateMinterController(EXPECTED_MINTER);
             assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
-            assertEq(minter.grossIssued(), 0);
+            assertEq(minter.maxSupply(), DeepstateAddresses.MINTER_MAX_SUPPLY);
             assertEq(minter.tokenAdministrationEndsAt(), 0);
         }
         if (EXPECTED_BOOTSTRAP.code.length != 0) {
             DGP001Bootstrap bootstrap = DGP001Bootstrap(EXPECTED_BOOTSTRAP);
-            assertEq(bootstrap.ENDOWMENT_PERCENT(), 30);
-            assertEq(bootstrap.VESTING_DURATION(), 365 days);
-            assertEq(bootstrap.STREAM_GRANULARITY(), 1 seconds);
             assertEq(bootstrap.governor(), DeepstateAddresses.GOVERNOR);
-            assertEq(address(bootstrap.minterController()), EXPECTED_MINTER);
             assertEq(address(bootstrap.deepstateToken()), DeepstateAddresses.DEEP);
-            assertEq(address(bootstrap.sablierLockup()), DeepstateAddresses.SABLIER_LOCKUP);
-            assertEq(address(bootstrap.legacyRewarder()), DeepstateAddresses.REWARDER);
-            assertEq(bootstrap.recipient(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
-            assertFalse(bootstrap.executed());
-            assertEq(bootstrap.snapshotBlock(), 0);
-            assertEq(bootstrap.snapshotAt(), 0);
-            assertEq(bootstrap.snapshotToken0(), address(0));
-            assertEq(bootstrap.snapshotToken1(), address(0));
-            assertEq(bootstrap.token0Accrued(), 0);
-            assertEq(bootstrap.token1Accrued(), 0);
-            assertEq(bootstrap.totalAccrued(), 0);
-            assertEq(bootstrap.endowmentAmount(), 0);
-            assertEq(bootstrap.preexistingBalanceBurned(), 0);
-            assertEq(bootstrap.postEndowmentSupply(), 0);
-            assertEq(bootstrap.streamId(), 0);
+            assertEq(bootstrap.endowmentAmount(), 300e18);
             assertFalse(
                 bootstrap.deepstateToken().hasRole(bootstrap.deepstateToken().MINTER_ROLE(), EXPECTED_BOOTSTRAP)
             );
@@ -343,7 +319,6 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
             assertEq(factory.owner(), DeepstateAddresses.GOVERNOR);
             assertEq(factory.operator(), address(0));
             assertEq(factory.nextDeploymentAt(), 0);
-            assertEq(factory.fundingCommitted(), 0);
             assertEq(DeepstateMinterController(EXPECTED_MINTER).rolesOf(EXPECTED_FACTORY), 0);
             assertEq(DeepstateV1Controller(EXPECTED_V1_CONTROLLER).rolesOf(EXPECTED_FACTORY), 0);
         }
@@ -385,13 +360,10 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         deployment.validateExistingFromPlan();
     }
 
-    function test_BootstrapCannotDeployBeforeItsMinterControllerDependency() public {
-        vm.expectRevert();
+    function test_BootstrapDeploymentIsIndependentOfTheMinterController() public {
         deployment.deployBootstrapFromPlan();
-        assertEq(EXPECTED_BOOTSTRAP.code.length, 0);
-
-        deployment.deployMinterFromPlan();
-        deployment.deployBootstrapFromPlan();
+        assertGt(EXPECTED_BOOTSTRAP.code.length, 0);
+        assertEq(EXPECTED_MINTER.code.length, 0);
         deployment.verifyBootstrapFromPlan();
     }
 

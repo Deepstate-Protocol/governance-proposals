@@ -9,7 +9,7 @@
     "rev": "37aa0d2ecb4a1f37a45b473729c100b2991c4e2d"
   },
   "lib/deepstate-protocol": {
-    "rev": "bcad2fc831f4830255e4cb113c62b1dd4a9aacb6"
+    "rev": "adfd9a8b662d7605c195d249b78e627b3aa87b6a"
   },
   "lib/forge-std": {
     "tag": {

@@ -14,7 +14,7 @@ import {DeepstateController} from "./DeepstateController.sol";
 import {ISablierLockupLinearV4} from "./interfaces/ISablierLockupLinearV4.sol";
 
 /// @title Deepstate Minter Controller
-/// @notice Allocates 30% of every authorized DEEP issuance to a vesting recipient.
+/// @notice Adds `floor(primary amount * 30 / 70)` to every authorized DEEP mint for a vesting recipient.
 /// @dev The recipient allocation is placed in a new non-cancelable, non-transferable Sablier
 /// Lockup v4 linear stream. This contract temporarily administers and mints DEEP during an exact two-year window
 /// while remaining owned by governance.
@@ -24,23 +24,14 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     uint256 public constant MINTER_ROLE = 1 << 0;
     uint256 public constant RECIPIENT_ALLOCATION_BPS = 30_00;
     uint256 public constant PRIMARY_ALLOCATION_BPS = 70_00;
-    /// @notice Smallest combined primary-plus-vesting issuance accepted by `mint`.
-    /// @dev A primary amount of 3 base units produces the first nonzero vesting amount (1 base unit).
-    uint256 public constant MINIMUM_COMBINED_ISSUANCE = 4;
     uint40 public constant VESTING_DURATION = 365 days;
     uint40 public constant TOKEN_ADMINISTRATION_DURATION = 2 * 365 days;
 
     DeepstateToken public immutable deepstateToken;
     ISablierLockupLinearV4 public immutable sablierLockup;
     address public immutable recipient;
-    /// @notice Maximum live DEEP supply this controller will permit after a mint.
-    uint256 public immutable mintCap;
-    /// @notice Maximum activation-time DEEP supply plus all issuance subsequently created by this controller.
-    uint256 public immutable grossIssuanceCap;
-
-    /// @notice Supply at activation plus every primary and vesting DEEP issuance subsequently created here.
-    /// @dev Burns never reduce this value, so they cannot reopen permanent issuance headroom.
-    uint256 public grossIssued;
+    /// @notice Maximum live DEEP supply permitted after an authorized mint.
+    uint256 public immutable maxSupply;
 
     /// @notice Administration deadline, zero before locking, and uint40 max after permanent return.
     uint40 public tokenAdministrationEndsAt;
@@ -53,22 +44,12 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         uint256 vestingAmount,
         uint256 streamId
     );
-    event TokenAdministrationActivated(uint40 indexed endsAt, uint256 grossIssuanceBaseline);
+    event TokenAdministrationActivated(uint40 indexed endsAt);
     event TokenAdministrationReturned(address indexed owner, address indexed caller);
-    event PreActivationTokenAdministrationReturned(address indexed owner, address indexed caller);
-    event GrossIssuanceRecorded(uint256 amount, uint256 totalGrossIssued);
-    event ExternalTokenMinterRevoked(address indexed account, address indexed caller);
 
     error InvalidDeepstateToken();
     error InvalidSablierLockup();
     error InvalidRecipient();
-    error InvalidMintCap();
-    error InvalidGrossIssuanceCap();
-    error InvalidMintRecipient();
-    error InvalidExternalTokenMinter(address account);
-    error ExternalTokenMinterNotActive(address account);
-    error MintAmountTooSmall();
-    error VestingAmountTooLarge(uint256 amount);
     error ControllerNotTokenAdmin();
     error ControllerNotSoleTokenAdmin(uint256 adminCount);
     error ControllerAlreadyTokenMinter();
@@ -77,43 +58,24 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
     error TokenAdministrationNotActive();
     error TokenAdministrationActive(uint40 endsAt);
     error TokenAdministrationExpired(uint40 endsAt);
-    error MintCapExceeded(uint256 cap, uint256 attemptedSupply);
-    error GrossIssuanceCapExceeded(uint256 cap, uint256 attemptedGrossIssued);
+    error MaxSupplyExceeded(uint256 maxSupply, uint256 attemptedSupply);
 
-    constructor(
-        address owner_,
-        address deepstateToken_,
-        address sablierLockup_,
-        address recipient_,
-        uint256 mintCap_,
-        uint256 grossIssuanceCap_
-    ) DeepstateController(owner_) {
+    constructor(address owner_, address deepstateToken_, address sablierLockup_, address recipient_, uint256 maxSupply_)
+        DeepstateController(owner_)
+    {
         if (deepstateToken_ == address(0) || deepstateToken_.code.length == 0) {
             revert InvalidDeepstateToken();
         }
         if (sablierLockup_ == address(0) || sablierLockup_.code.length == 0) revert InvalidSablierLockup();
         if (recipient_ == address(0)) revert InvalidRecipient();
-        uint256 currentSupply = DeepstateToken(deepstateToken_).totalSupply();
-        if (mintCap_ < MINIMUM_COMBINED_ISSUANCE || currentSupply > mintCap_ - MINIMUM_COMBINED_ISSUANCE) {
-            revert InvalidMintCap();
-        }
-        if (
-            grossIssuanceCap_ < MINIMUM_COMBINED_ISSUANCE
-                || currentSupply > grossIssuanceCap_ - MINIMUM_COMBINED_ISSUANCE
-        ) {
-            revert InvalidGrossIssuanceCap();
-        }
 
         deepstateToken = DeepstateToken(deepstateToken_);
         sablierLockup = ISablierLockupLinearV4(sablierLockup_);
         recipient = recipient_;
-        mintCap = mintCap_;
-        grossIssuanceCap = grossIssuanceCap_;
+        maxSupply = maxSupply_;
     }
 
     /// @notice Activate the reusable 730-day token-administration and controlled-minting term.
-    /// @dev Recording the complete live supply as the gross baseline makes all pre-activation issuance consume the
-    /// permanent cap.
     function activateTokenAdministration() external onlyOwner nonReentrant {
         if (tokenAdministrationEndsAt != 0) revert TokenAdministrationAlreadyActivated();
 
@@ -126,33 +88,9 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         if (deepstateToken.hasRole(tokenMinterRole, address(this))) revert ControllerAlreadyTokenMinter();
         deepstateToken.grantRole(tokenMinterRole, address(this));
 
-        uint256 baseline = deepstateToken.totalSupply();
-        if (baseline > mintCap) revert MintCapExceeded(mintCap, baseline);
-        if (baseline > grossIssuanceCap) revert GrossIssuanceCapExceeded(grossIssuanceCap, baseline);
-        grossIssued = baseline;
-
         uint40 endsAt = SafeCastLib.toUint40(block.timestamp + TOKEN_ADMINISTRATION_DURATION);
         tokenAdministrationEndsAt = endsAt;
-        emit TokenAdministrationActivated(endsAt, baseline);
-    }
-
-    /// @notice Return DEEP administration if governance transferred it before an activation attempt that could not
-    /// complete. This recovery path is permanently disabled once the two-year term starts.
-    function returnPreActivationTokenAdministration() external onlyOwner nonReentrant {
-        if (tokenAdministrationEndsAt != 0) revert TokenAdministrationAlreadyActivated();
-
-        DeepstateToken token = deepstateToken;
-        bytes32 tokenAdminRole = token.DEFAULT_ADMIN_ROLE();
-        if (!token.hasRole(tokenAdminRole, address(this))) revert ControllerNotTokenAdmin();
-
-        address owner_ = owner();
-        if (!token.hasRole(tokenAdminRole, owner_)) token.grantRole(tokenAdminRole, owner_);
-
-        bytes32 tokenMinterRole = token.MINTER_ROLE();
-        if (token.hasRole(tokenMinterRole, address(this))) token.revokeRole(tokenMinterRole, address(this));
-        token.renounceRole(tokenAdminRole, address(this));
-
-        emit PreActivationTokenAdministrationReturned(owner_, msg.sender);
+        emit TokenAdministrationActivated(endsAt);
     }
 
     /// @notice Unlock DEEP administration to this contract's current governance owner after the term expires.
@@ -178,23 +116,8 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         emit TokenAdministrationReturned(owner_, msg.sender);
     }
 
-    /// @notice Revoke a bypass token-level minter while this controller administers DEEP.
-    /// @dev This deliberately exposes no corresponding grant path and cannot revoke the controller itself.
-    function revokeExternalTokenMinter(address account) external onlyOwner nonReentrant {
-        if (account == address(0) || account == address(this)) revert InvalidExternalTokenMinter(account);
-
-        bytes32 tokenAdminRole = deepstateToken.DEFAULT_ADMIN_ROLE();
-        if (!deepstateToken.hasRole(tokenAdminRole, address(this))) revert ControllerNotTokenAdmin();
-        bytes32 tokenMinterRole = deepstateToken.MINTER_ROLE();
-        if (!deepstateToken.hasRole(tokenMinterRole, account)) revert ExternalTokenMinterNotActive(account);
-
-        deepstateToken.revokeRole(tokenMinterRole, account);
-        emit ExternalTokenMinterRevoked(account, msg.sender);
-    }
-
-    /// @notice During the active administration term, mint the 70% primary tranche `amount` to `to` and the 30%
-    /// tranche into a one-year stream.
-    /// @dev The recipient amount is `floor(amount * 30 / 70)`. Amounts that round it to zero revert. Minting is
+    /// @notice During the active administration term, mint `amount` to `to` and vest the corresponding allocation.
+    /// @dev The vested amount is `floor(amount * 30 / 70)`. The pinned Sablier rejects a zero deposit. Minting is
     /// permitted only after administration is locked and strictly before its deadline.
     function mint(address to, uint256 amount)
         external
@@ -205,35 +128,16 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
         uint40 endsAt = tokenAdministrationEndsAt;
         if (endsAt == 0 || endsAt == type(uint40).max) revert TokenAdministrationNotActive();
         if (block.timestamp >= endsAt) revert TokenAdministrationExpired(endsAt);
-        if (to == address(0)) revert InvalidMintRecipient();
 
         uint256 vestingAmount = FixedPointMathLib.fullMulDiv(amount, RECIPIENT_ALLOCATION_BPS, PRIMARY_ALLOCATION_BPS);
-        if (vestingAmount == 0) revert MintAmountTooSmall();
-        if (vestingAmount > type(uint128).max) revert VestingAmountTooLarge(vestingAmount);
+        uint256 attemptedSupply = deepstateToken.totalSupply() + amount + vestingAmount;
+        if (attemptedSupply > maxSupply) revert MaxSupplyExceeded(maxSupply, attemptedSupply);
         uint128 streamAmount = SafeCastLib.toUint128(vestingAmount);
-
-        uint256 mintSupply = amount + vestingAmount;
-        uint256 attemptedGrossIssued = grossIssued + mintSupply;
-        if (attemptedGrossIssued > grossIssuanceCap) {
-            revert GrossIssuanceCapExceeded(grossIssuanceCap, attemptedGrossIssued);
-        }
-        // Effects precede all token and Sablier interactions. Any later revert rolls this update back atomically.
-        grossIssued = attemptedGrossIssued;
-
-        uint256 attemptedSupply = deepstateToken.totalSupply() + mintSupply;
-        if (attemptedSupply > mintCap) revert MintCapExceeded(mintCap, attemptedSupply);
 
         deepstateToken.mint(to, amount);
         deepstateToken.mint(address(this), vestingAmount);
 
         address(deepstateToken).safeApproveWithRetry(address(sablierLockup), vestingAmount);
-        streamId = _createStream(streamAmount, "Deepstate allocation");
-
-        emit MintedWithVesting(msg.sender, to, amount, recipient, vestingAmount, streamId);
-        emit GrossIssuanceRecorded(mintSupply, attemptedGrossIssued);
-    }
-
-    function _createStream(uint128 streamAmount, string memory shape) private returns (uint256 streamId) {
         streamId = sablierLockup.createWithDurationsLL(
             Lockup.CreateWithDurations({
                 sender: address(this),
@@ -242,11 +146,13 @@ contract DeepstateMinterController is DeepstateController, ReentrancyGuard {
                 token: IERC20(address(deepstateToken)),
                 cancelable: false,
                 transferable: false,
-                shape: shape
+                shape: "Deepstate allocation"
             }),
             LockupLinear.UnlockAmounts({start: 0, cliff: 0}),
             0,
             LockupLinear.Durations({cliff: 0, total: VESTING_DURATION})
         );
+
+        emit MintedWithVesting(msg.sender, to, amount, recipient, vestingAmount, streamId);
     }
 }

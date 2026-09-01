@@ -68,7 +68,7 @@ contract DeployDGP002 is DeepstateProposalScript {
 
     uint256 private constant _ACTION_COUNT = 3;
     uint256 private constant _DGP001_PROPOSAL_ID =
-        104_314_577_693_082_885_786_109_683_732_203_114_255_408_942_832_054_564_539_957_851_903_575_470_305_161;
+        3_129_422_573_715_232_763_191_445_708_321_076_080_578_208_958_120_505_855_986_403_290_789_525_128_455;
     uint256 private constant _FACTORY_MINTER_ROLE = 1;
     uint256 private constant _FACTORY_HOOK_MANAGER_ROLE = 1;
     uint256 private constant _DGP001_MARKET_FUNDING = 100_000_000e18;
@@ -156,13 +156,9 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(address(minter.deepstateToken()) == DeepstateAddresses.DEEP, 11);
         _pre(address(minter.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 12);
         _pre(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 13);
-        _pre(minter.mintCap() == DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP, 14);
-        _pre(minter.grossIssuanceCap() == DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP, 15);
-        _pre(bootstrap.executed(), 16);
-        _pre(bootstrap.snapshotAt() != 0, 17);
-
+        _pre(minter.maxSupply() == DeepstateAddresses.MINTER_MAX_SUPPLY, 14);
         uint40 administrationEndsAt = minter.tokenAdministrationEndsAt();
-        _pre(administrationEndsAt == bootstrap.snapshotAt() + minter.TOKEN_ADMINISTRATION_DURATION(), 18);
+        _pre(administrationEndsAt != 0 && administrationEndsAt != type(uint40).max, 18);
         _pre(block.timestamp < administrationEndsAt, 19);
 
         bytes32 defaultAdminRole = deep.DEFAULT_ADMIN_ROLE();
@@ -180,27 +176,20 @@ contract DeployDGP002 is DeepstateProposalScript {
 
         _pre(router.owner() == DeepstateAddresses.V1_CONTROLLER, 28);
         _pre(factory.operator() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 29);
-        uint256 fundingCommitted = factory.fundingCommitted();
-        _pre(fundingCommitted >= _DGP001_MARKET_FUNDING, 30);
-        _pre(fundingCommitted <= factory.fundingBudget(), 31);
-        _pre(fundingCommitted % _DGP001_MARKET_FUNDING == 0, 32);
-        _pre(factory.marketDeployed(DeepstateAddresses.NVDA_USDG_POOL_ID), 33);
-        address rewarderAddress = factory.activeRewarder(DeepstateAddresses.NVDA_USDG_POOL_ID);
+        address rewarderAddress = router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID);
         _pre(rewarderAddress != address(0), 34);
-        _pre(factory.rewarderPool(rewarderAddress) == DeepstateAddresses.NVDA_USDG_POOL_ID, 35);
-        _pre(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID) == rewarderAddress, 36);
+        _pre(rewarderAddress.code.length != 0, 35);
+        _pre(rewarderAddress != DeepstateAddresses.REWARDER, 36);
 
         DeepstateRewarderV2 rewarder = DeepstateRewarderV2(rewarderAddress);
         _pre(rewarder.owner() == DeepstateAddresses.REWARDER_FACTORY, 37);
-        _pre(!rewarder.retired(), 38);
         _pre(rewarder.rewardToken() == DeepstateAddresses.DEEP, 39);
         _pre(rewarder.poolId() == DeepstateAddresses.NVDA_USDG_POOL_ID, 40);
         _pre(rewarder.sideEmissionCap() == _DGP001_MARKET_FUNDING / 2, 41);
         _pre(rewarder.emissionDuration() == 365 days, 42);
 
         uint256 combinedIssuance = TOTAL_PRIMARY_MINT + TOTAL_VESTING_AMOUNT;
-        _pre(minter.grossIssued() <= minter.grossIssuanceCap() - combinedIssuance, 43);
-        _pre(deep.totalSupply() <= minter.mintCap() - combinedIssuance, 44);
+        _pre(deep.totalSupply() <= minter.maxSupply() - combinedIssuance, 44);
         _pre(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 46);
         _pre(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT == TOTAL_PRIMARY_MINT, 47);
         uint256 calculatedVesting = VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS()
@@ -214,13 +203,9 @@ contract DeployDGP002 is DeepstateProposalScript {
             49
         );
         _pre(bootstrap.governor() == DeepstateAddresses.GOVERNOR, 74);
-        _pre(address(bootstrap.minterController()) == DeepstateAddresses.MINTER_CONTROLLER, 75);
         _pre(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 76);
-        _pre(address(bootstrap.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 77);
-        _pre(address(bootstrap.legacyRewarder()) == DeepstateAddresses.REWARDER, 78);
-        _pre(bootstrap.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 79);
-        _pre(bootstrap.endowmentAmount() != 0 && bootstrap.streamId() != 0, 80);
-        _pre(deep.allowance(DeepstateAddresses.DGP001_BOOTSTRAP, DeepstateAddresses.SABLIER_LOCKUP) == 0, 82);
+        _pre(bootstrap.endowmentAmount() != 0, 80);
+        _pre(deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP) == 0, 82);
 
         if (requireFullGovernanceWindow) {
             uint256 governanceWindow =
@@ -237,8 +222,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         _post(deep.balanceOf(VOLUNTEER_A) >= VOLUNTEER_A_AMOUNT, 1);
         _post(deep.balanceOf(VOLUNTEER_B) >= VOLUNTEER_B_AMOUNT, 2);
         _post(deep.balanceOf(VOLUNTEER_C) >= VOLUNTEER_C_AMOUNT, 3);
-        _post(deep.totalSupply() <= minter.mintCap(), 4);
-        _post(minter.grossIssued() <= minter.grossIssuanceCap(), 5);
+        _post(deep.totalSupply() <= minter.maxSupply(), 4);
         _post(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 7);
 
         uint256 nextStreamId = lockup.nextStreamId();

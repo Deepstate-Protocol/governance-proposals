@@ -18,7 +18,7 @@ contract SablierComptrollerStub {
 }
 
 contract DeepstateMinterControllerSablierIntegrationTest is Test {
-    uint256 internal constant MINT_CAP = 3_000_000_000e18;
+    uint256 internal constant MAX_SUPPLY = 3_000_000_000e18;
 
     DeepstateToken internal deep;
     DeepstateMinterController internal minterController;
@@ -31,17 +31,15 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
         deep = new DeepstateToken(address(this), "Deepstate", "DEEP");
         SablierComptrollerStub comptroller = new SablierComptrollerStub();
         sablier = new SablierLockup(address(comptroller), address(0));
-        minterController = new DeepstateMinterController(
-            address(this), address(deep), address(sablier), recipient, MINT_CAP, MINT_CAP
-        );
+        minterController =
+            new DeepstateMinterController(address(this), address(deep), address(sablier), recipient, MAX_SUPPLY);
 
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(minterController));
         deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), address(this));
         minterController.activateTokenAdministration();
     }
 
-    function test_ActivationRecordsCurrentSupplyWithoutCreatingAStream() public view {
-        assertEq(minterController.grossIssued(), deep.totalSupply());
+    function test_ActivationCreatesNoStream() public view {
         assertEq(sablier.nextStreamId(), 1);
     }
 
@@ -68,7 +66,6 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
         assertEq(deep.balanceOf(address(minterController)), 0);
         assertEq(deep.allowance(address(minterController), address(sablier)), 0);
         assertEq(deep.totalSupply(), 70e18 + vestingAmount);
-        assertEq(minterController.grossIssued(), 70e18 + vestingAmount);
 
         vm.warp(startTime + 365 days / 2);
         assertEq(sablier.streamedAmountOf(streamId), vestingAmount / 2);
@@ -100,6 +97,20 @@ contract DeepstateMinterControllerSablierIntegrationTest is Test {
 
         assertEq(sablier.ownerOf(streamId), recipient);
         assertEq(deep.balanceOf(address(sablier)), 30e18);
+    }
+
+    function test_RealSablierRejectsZeroVestingAndRollsBackThePrimaryMint() public {
+        uint256 supplyBefore = deep.totalSupply();
+        uint256 streamBefore = sablier.nextStreamId();
+
+        vm.expectRevert();
+        minterController.mint(mintRecipient, 2);
+
+        assertEq(deep.totalSupply(), supplyBefore);
+        assertEq(deep.balanceOf(mintRecipient), 0);
+        assertEq(deep.balanceOf(address(minterController)), 0);
+        assertEq(deep.allowance(address(minterController), address(sablier)), 0);
+        assertEq(sablier.nextStreamId(), streamBefore);
     }
 
     function test_RealSablierConsumesOnlyNewlyMintedVestingAmount() public {

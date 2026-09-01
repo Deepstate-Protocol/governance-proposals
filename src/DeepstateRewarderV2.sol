@@ -2,24 +2,14 @@
 pragma solidity 0.8.28;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 
 import {DeepstateRewarder} from "deepstate-protocol/DeepstateRewarder.sol";
 import {IBurnableERC20} from "deepstate-protocol/interfaces/IBurnableERC20.sol";
 
 /// @title Deepstate Rewarder V2
-/// @notice Extends the protocol rewarder with irreversible retirement and burning of remaining rewards.
+/// @notice Extends the protocol rewarder so its owner can burn its remaining rewards.
 /// @dev Ownable is inherited through DeepstateRewarder.
-contract DeepstateRewarderV2 is DeepstateRewarder, ReentrancyGuard {
-    /// @notice Whether this reward program has been permanently retired.
-    bool public retired;
-
-    event RewarderRetiredAndBalanceBurned(uint256 amount);
-    event RetiredRewarderBalanceBurned(address indexed caller, uint256 amount);
-
-    error RewarderRetired();
-    error RewarderNotRetired();
-
+contract DeepstateRewarderV2 is DeepstateRewarder {
     constructor(
         address owner_,
         address deepstate_,
@@ -50,34 +40,9 @@ contract DeepstateRewarderV2 is DeepstateRewarder, ReentrancyGuard {
         )
     {}
 
-    /// @notice Permanently retire this rewarder and burn its entire reward-token balance.
-    /// @dev Retirement disables accounting, claimant registration, and distribution forever. Ownership
-    /// is renounced before the external token call, so neither reentrancy nor governance can reactivate this instance.
-    function retireAndBurnBalance() external onlyOwner nonReentrant {
-        _retire();
-        _setOwner(address(0));
+    /// @notice Burn this rewarder's entire reward-token balance.
+    function burnBalance() external onlyOwner {
         uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
         IBurnableERC20(rewardToken).burn(amount);
-        emit RewarderRetiredAndBalanceBurned(amount);
-    }
-
-    /// @notice Burn any reward tokens sent directly to this rewarder after its retirement.
-    /// @dev Permissionless cleanup prevents mistaken or adversarial transfers from becoming permanently stranded.
-    function burnRetiredBalance() external nonReentrant {
-        if (!retired) revert RewarderNotRetired();
-        uint256 amount = SafeTransferLib.balanceOf(rewardToken, address(this));
-        IBurnableERC20(rewardToken).burn(amount);
-        emit RetiredRewarderBalanceBurned(msg.sender, amount);
-    }
-
-    /// @dev Permanently stops hook accounting, claimant registration, and reward distribution.
-    function _retire() internal {
-        _beforeRewarderAction();
-        retired = true;
-    }
-
-    /// @dev Applies the V2 lifecycle to every guarded entry point inherited from the protocol base.
-    function _beforeRewarderAction() internal view override {
-        if (retired) revert RewarderRetired();
     }
 }

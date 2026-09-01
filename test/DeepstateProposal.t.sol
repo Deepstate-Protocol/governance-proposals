@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {DeepstateProposalScript} from "../script/DeepstateProposalScript.s.sol";
 import {DeepstateAddresses} from "../script/config/DeepstateAddresses.sol";
-import {DeepstateProposal} from "../src/DeepstateProposal.sol";
+import {DeepstateProposal} from "../script/DeepstateProposal.sol";
 
 contract MockDeepstateGovernor {
     address internal constant INTENDED_PROPOSER = address(0xA11CE);

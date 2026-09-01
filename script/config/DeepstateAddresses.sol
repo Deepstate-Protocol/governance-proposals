@@ -10,12 +10,10 @@ library DeepstateAddresses {
     uint48 internal constant GOVERNANCE_START = 1_788_074_638;
 
     // Release policy, not protocol-discovered values. Changing any value creates a different CREATE2 deployment.
-    uint256 internal constant MINTER_LIVE_SUPPLY_CAP = 3_000_000_000e18;
-    uint256 internal constant MINTER_GROSS_ISSUANCE_CAP = 3_000_000_000e18;
-    uint256 internal constant FACTORY_LIFETIME_FUNDING_BUDGET = 1_000_000_000e18;
+    uint256 internal constant MINTER_MAX_SUPPLY = 3_000_000_000e18;
     uint256 internal constant MINIMUM_ACTIVATION_ISSUANCE_HEADROOM = 442_857_142_857_142_857_142_857_142;
 
-    // Immutable configuration of the live predecessor Rewarder used by the one-time endowment snapshot and migration.
+    // Immutable configuration of the live predecessor Rewarder used by the endowment snapshot and atomic replacement.
     uint96 internal constant LEGACY_REWARDER_SIDE_EMISSION_CAP = 500_000_000e18;
     uint32 internal constant LEGACY_REWARDER_EMISSION_DURATION = 34_128_000; // 395 days
     uint160 internal constant LEGACY_USDG_START_QUANTITY = 1e6;

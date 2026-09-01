@@ -15,8 +15,8 @@ contract DeploymentVerificationHarness is DeployRewarderV2System {
         _verifyMinterController(deployed);
     }
 
-    function verifyBootstrap(address deployed, address minterController) external view {
-        _verifyBootstrap(deployed, minterController);
+    function verifyBootstrap(address deployed) external view {
+        _verifyBootstrap(deployed);
     }
 
     function verifyV1Controller(address deployed) external view {
@@ -56,14 +56,8 @@ contract DeploymentDeepstateTokenWithRoleMock is DeploymentDeepstateTokenMock {
 
 contract DeploymentDeepstateTokenWithoutHeadroomMock is DeploymentDeepstateTokenMock {
     function totalSupply() external pure override returns (uint256) {
-        return DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP
+        return DeepstateAddresses.MINTER_MAX_SUPPLY
             - (300_000_000e18 + 100_000_000e18 + uint256(100_000_000e18) * 30 / 70) + 1;
-    }
-}
-
-contract DeploymentUSDGMock {
-    function decimals() external pure returns (uint8) {
-        return 6;
     }
 }
 
@@ -117,8 +111,8 @@ contract DeploymentLegacyRewarderMock {
     }
 
     function totalAccrued(address token) external pure returns (uint96) {
-        if (token == DeepstateAddresses.USDG) return 1;
-        if (token == DeepstateAddresses.NVDA) return 2;
+        if (token == DeepstateAddresses.USDG) return 700e18;
+        if (token == DeepstateAddresses.NVDA) return 300e18;
         revert();
     }
 }
@@ -134,24 +128,6 @@ contract DeploymentMinterDependencyMock {
 
     function rolesOf(address) external pure virtual returns (uint256) {
         return 0;
-    }
-}
-
-contract DeploymentBootstrapMinterDependencyMock {
-    function owner() external pure returns (address) {
-        return DeepstateAddresses.GOVERNOR;
-    }
-
-    function deepstateToken() external pure returns (address) {
-        return DeepstateAddresses.DEEP;
-    }
-
-    function sablierLockup() external pure returns (address) {
-        return DeepstateAddresses.SABLIER_LOCKUP;
-    }
-
-    function recipient() external pure returns (address) {
-        return DeepstateAddresses.DEEPSTATE_INC_SAFE;
     }
 }
 
@@ -270,21 +246,12 @@ contract DeployRewarderV2SystemTest is Test {
         assertEq(vm.parseJsonBytes32(manifest, ".contracts.rewarderFactory.salt"), deployment.FACTORY_SALT());
 
         assertEq(
-            vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.minterLiveSupplyCap")),
-            DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP
-        );
-        assertEq(
-            vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.minterGrossIssuanceCap")),
-            DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
-        );
-        assertEq(
-            vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.factoryLifetimeFundingBudget")),
-            DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET
+            vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.minterMaxSupply")),
+            DeepstateAddresses.MINTER_MAX_SUPPLY
         );
         assertEq(vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.factoryMarketFunding")), 100_000_000e18);
         assertEq(vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.factorySideEmissionCap")), 50_000_000e18);
         assertEq(vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.factoryEmissionDurationSeconds")), 365 days);
-        assertEq(vm.parseJsonUint(manifest, ".releasePolicy.maximumFullyFundedMarkets"), 10);
         assertFalse(vm.parseJsonBool(manifest, ".releasePolicy.governanceTopUpSupported"));
         assertEq(
             vm.parseUint(vm.parseJsonString(manifest, ".releasePolicy.maximumLegacyEndowment")),
@@ -343,19 +310,18 @@ contract DeployRewarderV2SystemTest is Test {
 
         string[] memory minterArguments =
             vm.parseJsonStringArray(manifest, ".contracts.minterController.constructorArguments");
-        assertEq(minterArguments.length, 6);
+        assertEq(minterArguments.length, 5);
         assertEq(vm.parseAddress(minterArguments[0]), DeepstateAddresses.GOVERNOR);
         assertEq(vm.parseAddress(minterArguments[1]), DeepstateAddresses.DEEP);
         assertEq(vm.parseAddress(minterArguments[2]), DeepstateAddresses.SABLIER_LOCKUP);
         assertEq(vm.parseAddress(minterArguments[3]), DeepstateAddresses.DEEPSTATE_INC_SAFE);
-        assertEq(vm.parseUint(minterArguments[4]), DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP);
-        assertEq(vm.parseUint(minterArguments[5]), DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP);
+        assertEq(vm.parseUint(minterArguments[4]), DeepstateAddresses.MINTER_MAX_SUPPLY);
 
         string[] memory bootstrapArguments =
             vm.parseJsonStringArray(manifest, ".contracts.dgp001Bootstrap.constructorArguments");
         assertEq(bootstrapArguments.length, 3);
         assertEq(vm.parseAddress(bootstrapArguments[0]), DeepstateAddresses.GOVERNOR);
-        assertEq(vm.parseAddress(bootstrapArguments[1]), EXPECTED_MINTER);
+        assertEq(vm.parseAddress(bootstrapArguments[1]), DeepstateAddresses.DEEP);
         assertEq(vm.parseAddress(bootstrapArguments[2]), DeepstateAddresses.REWARDER);
 
         string[] memory v1Arguments = vm.parseJsonStringArray(manifest, ".contracts.v1Controller.constructorArguments");
@@ -365,12 +331,10 @@ contract DeployRewarderV2SystemTest is Test {
 
         string[] memory factoryArguments =
             vm.parseJsonStringArray(manifest, ".contracts.rewarderFactory.constructorArguments");
-        assertEq(factoryArguments.length, 5);
+        assertEq(factoryArguments.length, 3);
         assertEq(vm.parseAddress(factoryArguments[0]), DeepstateAddresses.GOVERNOR);
         assertEq(vm.parseAddress(factoryArguments[1]), EXPECTED_V1_CONTROLLER);
         assertEq(vm.parseAddress(factoryArguments[2]), EXPECTED_MINTER);
-        assertEq(vm.parseAddress(factoryArguments[3]), DeepstateAddresses.USDG);
-        assertEq(vm.parseUint(factoryArguments[4]), DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET);
         assertNotEq(
             vm.parseJsonAddress(manifest, ".liveDependencies.sablierLockupV4.nativeToken"), DeepstateAddresses.DEEP
         );
@@ -400,8 +364,7 @@ contract DeployRewarderV2SystemTest is Test {
             DeepstateAddresses.DEEP,
             DeepstateAddresses.SABLIER_LOCKUP,
             DeepstateAddresses.DEEPSTATE_INC_SAFE,
-            DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP,
-            DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
+            DeepstateAddresses.MINTER_MAX_SUPPLY
         );
 
         assertEq(address(controller).codehash, deployment.MINTER_RUNTIME_CODE_HASH());
@@ -416,7 +379,7 @@ contract DeployRewarderV2SystemTest is Test {
         verificationHarness.verifyMinterController(address(controller));
         vm.etch(DeepstateAddresses.DEEP, address(tokenMock).code);
 
-        for (uint256 slot; slot < 2; ++slot) {
+        for (uint256 slot; slot < 1; ++slot) {
             vm.store(address(controller), bytes32(slot), bytes32(uint256(1)));
             vm.expectRevert(
                 abi.encodeWithSelector(
@@ -429,44 +392,32 @@ contract DeployRewarderV2SystemTest is Test {
     }
 
     function test_ExistingBootstrapMustMatchPinnedRuntimeConfigurationAndPristineState() public {
-        DeploymentCodeMock codeMock = new DeploymentCodeMock();
         DeploymentDeepstateTokenMock tokenMock = new DeploymentDeepstateTokenMock();
         DeploymentLegacyRewarderMock legacyMock = new DeploymentLegacyRewarderMock();
         vm.etch(DeepstateAddresses.DEEP, address(tokenMock).code);
-        vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.REWARDER, address(legacyMock).code);
 
-        DeploymentBootstrapMinterDependencyMock controllerMock = new DeploymentBootstrapMinterDependencyMock();
-        vm.etch(EXPECTED_MINTER, address(controllerMock).code);
         DGP001Bootstrap bootstrap =
-            new DGP001Bootstrap(DeepstateAddresses.GOVERNOR, EXPECTED_MINTER, DeepstateAddresses.REWARDER);
+            new DGP001Bootstrap(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER);
 
         assertEq(address(bootstrap).codehash, deployment.DGP001_BOOTSTRAP_RUNTIME_CODE_HASH());
-        verificationHarness.verifyBootstrap(address(bootstrap), EXPECTED_MINTER);
-
-        // Every persistent bootstrap field is required to remain at its constructor value before DGP-001 executes.
-        for (uint256 slot; slot < 10; ++slot) {
-            vm.store(address(bootstrap), bytes32(slot), bytes32(uint256(1)));
-            vm.expectRevert(
-                abi.encodeWithSelector(DeployRewarderV2System.InvalidDeployedConfiguration.selector, address(bootstrap))
-            );
-            verificationHarness.verifyBootstrap(address(bootstrap), EXPECTED_MINTER);
-            vm.store(address(bootstrap), bytes32(slot), bytes32(0));
-        }
+        verificationHarness.verifyBootstrap(address(bootstrap));
+        assertEq(bootstrap.endowmentAmount(), 300e18);
 
         DeploymentDeepstateTokenWithRoleMock tokenWithRole = new DeploymentDeepstateTokenWithRoleMock();
         vm.etch(DeepstateAddresses.DEEP, address(tokenWithRole).code);
         vm.expectRevert(
             abi.encodeWithSelector(DeployRewarderV2System.InvalidDeployedConfiguration.selector, address(bootstrap))
         );
-        verificationHarness.verifyBootstrap(address(bootstrap), EXPECTED_MINTER);
+        verificationHarness.verifyBootstrap(address(bootstrap));
 
         vm.etch(DeepstateAddresses.DEEP, address(tokenMock).code);
+        DeploymentCodeMock codeMock = new DeploymentCodeMock();
         vm.etch(address(bootstrap), address(codeMock).code);
         vm.expectRevert(
             abi.encodeWithSelector(DeployRewarderV2System.InvalidDeployedConfiguration.selector, address(bootstrap))
         );
-        verificationHarness.verifyBootstrap(address(bootstrap), EXPECTED_MINTER);
+        verificationHarness.verifyBootstrap(address(bootstrap));
     }
 
     function test_ExistingV1ControllerMustMatchPinnedRuntime() public {
@@ -502,23 +453,16 @@ contract DeployRewarderV2SystemTest is Test {
         DeploymentCodeMock codeMock = new DeploymentCodeMock();
         DeploymentMinterDependencyMock minterMock = new DeploymentMinterDependencyMock();
         DeploymentV1DependencyMock v1Mock = new DeploymentV1DependencyMock();
-        DeploymentUSDGMock usdGMock = new DeploymentUSDGMock();
         vm.etch(DeepstateAddresses.DEEP, address(codeMock).code);
         vm.etch(minterController, address(minterMock).code);
         vm.etch(v1Controller, address(v1Mock).code);
-        vm.etch(DeepstateAddresses.USDG, address(usdGMock).code);
 
-        DeepstateRewarderFactory factory = new DeepstateRewarderFactory(
-            DeepstateAddresses.GOVERNOR,
-            v1Controller,
-            minterController,
-            DeepstateAddresses.USDG,
-            DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET
-        );
+        DeepstateRewarderFactory factory =
+            new DeepstateRewarderFactory(DeepstateAddresses.GOVERNOR, v1Controller, minterController);
         assertEq(address(factory).codehash, deployment.FACTORY_RUNTIME_CODE_HASH());
         verificationHarness.verifyFactory(address(factory), minterController, v1Controller);
 
-        for (uint256 slot; slot < 3; ++slot) {
+        for (uint256 slot; slot < 2; ++slot) {
             vm.store(address(factory), bytes32(slot), bytes32(uint256(1)));
             vm.expectRevert(
                 abi.encodeWithSelector(DeployRewarderV2System.InvalidDeployedConfiguration.selector, address(factory))

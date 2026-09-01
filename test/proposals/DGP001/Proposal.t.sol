@@ -2,6 +2,9 @@
 pragma solidity 0.8.28;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Lockup} from "@sablier/lockup/src/types/Lockup.sol";
+import {LockupLinear} from "@sablier/lockup/src/types/LockupLinear.sol";
 import {Test} from "forge-std/Test.sol";
 
 import {
@@ -16,6 +19,7 @@ import {DeepstateMinterController} from "../../../src/DeepstateMinterController.
 import {DeepstateRewarderFactory} from "../../../src/DeepstateRewarderFactory.sol";
 import {DeepstateV1Controller} from "../../../src/DeepstateV1Controller.sol";
 import {IDeepstateGovernor} from "../../../src/interfaces/IDeepstateGovernor.sol";
+import {ISablierLockupLinearV4} from "../../../src/interfaces/ISablierLockupLinearV4.sol";
 import {IDeepstateV1} from "../../../src/interfaces/IDeepstateV1.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
@@ -45,11 +49,12 @@ contract DGP001Test is Test {
     uint256 internal constant FORK_BLOCK = 50358350;
     bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x13d578a939920f9bd50d7ee2fdfd457e50f699561ddec01d953473851cd9cd2f;
+        0xec3d4f22e5552fcfca7034914cef9d3750c11898aec366ce28fcdffc8bb5b660;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _MARKET_FUNDING = 100_000_000e18;
     uint256 private constant _MARKET_VESTING = _MARKET_FUNDING * 30 / 70;
+    uint128 private constant _ENDOWMENT_AMOUNT = 44_656_649_085_084_309_261_855_700;
     uint256 private constant _POOL_STATE_MAPPING_SLOT = 2;
     uint256 private constant _BOTH_HOOK_FLAGS = (uint256(1) << 254) | (uint256(1) << 255);
     bytes32 private constant _PINNED_ACTIVE_BOOK_ID =
@@ -82,59 +87,107 @@ contract DGP001Test is Test {
         _assertPristineDeployment();
     }
 
-    function testProposalPayload() public view {
+    function testProposalPayload() public {
+        vm.mockCall(
+            DeepstateAddresses.DGP001_BOOTSTRAP,
+            abi.encodeWithSignature("endowmentAmount()"),
+            abi.encode(_ENDOWMENT_AMOUNT)
+        );
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
             proposal.proposal();
 
-        assertEq(targets.length, 10);
-        assertEq(values.length, 10);
-        assertEq(calldatas.length, 10);
+        assertEq(targets.length, 15);
+        assertEq(values.length, 15);
+        assertEq(calldatas.length, 15);
         for (uint256 i; i < values.length; ++i) {
             assertEq(values[i], 0);
         }
 
         assertEq(targets[0], DeepstateAddresses.DEEP);
-        assertEq(targets[1], DeepstateAddresses.DGP001_BOOTSTRAP);
-        assertEq(targets[2], DeepstateAddresses.DEEP);
+        assertEq(targets[1], DeepstateAddresses.DEEP);
+        assertEq(targets[2], DeepstateAddresses.DGP001_BOOTSTRAP);
         assertEq(targets[3], DeepstateAddresses.DEEP);
-        assertEq(targets[4], DeepstateAddresses.MINTER_CONTROLLER);
-        assertEq(targets[5], DeepstateAddresses.MINTER_CONTROLLER);
-        assertEq(targets[6], DeepstateAddresses.ROUTER);
-        assertEq(targets[7], DeepstateAddresses.V1_CONTROLLER);
-        assertEq(targets[8], DeepstateAddresses.REWARDER_FACTORY);
-        assertEq(targets[9], DeepstateAddresses.REWARDER_FACTORY);
+        assertEq(targets[4], DeepstateAddresses.DEEP);
+        assertEq(targets[5], DeepstateAddresses.SABLIER_LOCKUP);
+        assertEq(targets[6], DeepstateAddresses.DEEP);
+        assertEq(targets[7], DeepstateAddresses.DEEP);
+        assertEq(targets[8], DeepstateAddresses.MINTER_CONTROLLER);
+        assertEq(targets[9], DeepstateAddresses.MINTER_CONTROLLER);
+        assertEq(targets[10], DeepstateAddresses.ROUTER);
+        assertEq(targets[11], DeepstateAddresses.ROUTER);
+        assertEq(targets[12], DeepstateAddresses.V1_CONTROLLER);
+        assertEq(targets[13], DeepstateAddresses.REWARDER_FACTORY);
+        assertEq(targets[14], DeepstateAddresses.REWARDER_FACTORY);
 
         assertEq(
             calldatas[0],
+            abi.encodeCall(IAccessControl.revokeRole, (keccak256("MINTER_ROLE"), DeepstateAddresses.DEEP_DEPLOYER))
+        );
+        assertEq(
+            calldatas[1],
             abi.encodeCall(IAccessControl.grantRole, (keccak256("MINTER_ROLE"), DeepstateAddresses.DGP001_BOOTSTRAP))
         );
-        assertEq(calldatas[1], abi.encodeCall(DGP001Bootstrap.execute, ()));
+        assertEq(calldatas[2], abi.encodeCall(DGP001Bootstrap.mint, ()));
         assertEq(
-            calldatas[2], abi.encodeCall(IAccessControl.grantRole, (bytes32(0), DeepstateAddresses.MINTER_CONTROLLER))
+            calldatas[3],
+            abi.encodeCall(IAccessControl.revokeRole, (keccak256("MINTER_ROLE"), DeepstateAddresses.DGP001_BOOTSTRAP))
         );
-        assertEq(calldatas[3], abi.encodeCall(IAccessControl.renounceRole, (bytes32(0), DeepstateAddresses.GOVERNOR)));
-        assertEq(calldatas[4], abi.encodeCall(DeepstateMinterController.activateTokenAdministration, ()));
+        uint128 endowmentAmount = _ENDOWMENT_AMOUNT;
+        assertEq(
+            calldatas[4], abi.encodeCall(IERC20.approve, (DeepstateAddresses.SABLIER_LOCKUP, uint256(endowmentAmount)))
+        );
         assertEq(
             calldatas[5],
+            abi.encodeCall(
+                ISablierLockupLinearV4.createWithDurationsLL,
+                (
+                    Lockup.CreateWithDurations({
+                        sender: DeepstateAddresses.GOVERNOR,
+                        recipient: DeepstateAddresses.DEEPSTATE_INC_SAFE,
+                        depositAmount: endowmentAmount,
+                        token: IERC20(DeepstateAddresses.DEEP),
+                        cancelable: false,
+                        transferable: false,
+                        shape: "Deepstate Inc endowment"
+                    }),
+                    LockupLinear.UnlockAmounts({start: 0, cliff: 0}),
+                    uint40(1 seconds),
+                    LockupLinear.Durations({cliff: 0, total: 365 days})
+                )
+            )
+        );
+        assertEq(
+            calldatas[6], abi.encodeCall(IAccessControl.grantRole, (bytes32(0), DeepstateAddresses.MINTER_CONTROLLER))
+        );
+        assertEq(calldatas[7], abi.encodeCall(IAccessControl.renounceRole, (bytes32(0), DeepstateAddresses.GOVERNOR)));
+        assertEq(calldatas[8], abi.encodeCall(DeepstateMinterController.activateTokenAdministration, ()));
+        assertEq(
+            calldatas[9],
             abi.encodeCall(IDeepstateRoleAdminDGP001.grantRoles, (DeepstateAddresses.REWARDER_FACTORY, uint256(1)))
         );
-        assertEq(calldatas[6], abi.encodeCall(IDeepstateV1.transferOwnership, (DeepstateAddresses.V1_CONTROLLER)));
         assertEq(
-            calldatas[7],
+            calldatas[10],
+            abi.encodeCall(
+                IDeepstateV1.setPoolHookConfig,
+                (DeepstateAddresses.USDG, DeepstateAddresses.NVDA, address(0), false, false)
+            )
+        );
+        assertEq(calldatas[11], abi.encodeCall(IDeepstateV1.transferOwnership, (DeepstateAddresses.V1_CONTROLLER)));
+        assertEq(
+            calldatas[12],
             abi.encodeCall(IDeepstateRoleAdminDGP001.grantRoles, (DeepstateAddresses.REWARDER_FACTORY, uint256(1)))
         );
         DeepstateRewarderFactory.MarketConfig memory market = DeepstateRewarderFactory.MarketConfig({
-            stockToken: DeepstateAddresses.NVDA,
-            stockStartQuantity: 1e18,
-            stockMaxQuantity: 5_000e18,
-            stockBuySideActive: true,
-            usdGBuySideActive: true
+            token0: DeepstateAddresses.USDG,
+            token1: DeepstateAddresses.NVDA,
+            token0MaxUnits: 1_000_000,
+            token1MaxUnits: 5_000,
+            token0Active: true,
+            token1Active: true
         });
+        assertEq(calldatas[13], abi.encodeCall(DeepstateRewarderFactory.deployMarket, (market)));
         assertEq(
-            calldatas[8], abi.encodeCall(DeepstateRewarderFactory.migrateMarket, (market, DeepstateAddresses.REWARDER))
-        );
-        assertEq(
-            calldatas[9], abi.encodeCall(DeepstateRewarderFactory.setOperator, (DeepstateAddresses.DEEPSTATE_INC_SAFE))
+            calldatas[14], abi.encodeCall(DeepstateRewarderFactory.setOperator, (DeepstateAddresses.DEEPSTATE_INC_SAFE))
         );
 
         assertEq(proposal.proposer(), QUORUM_VOTER);
@@ -157,63 +210,85 @@ contract DGP001Test is Test {
         IDeepstateV1 router = IDeepstateV1(DeepstateAddresses.ROUTER);
 
         uint256 supplyBefore = deep.totalSupply();
-        uint256 nextStreamId = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP).nextStreamId();
-        uint256 expectedEndowment = _currentLegacyEndowment();
+        uint256 governorBalanceBefore = deep.balanceOf(DeepstateAddresses.GOVERNOR);
+        ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
+        uint256 nextStreamId = lockup.nextStreamId();
+        uint256 expectedEndowment = bootstrap.endowmentAmount();
 
         _executeAction(targets, values, calldatas, 0);
+        assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DEEP_DEPLOYER));
+        assertEq(deep.defaultAdminCount(), 1);
+        assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
+
+        _executeAction(targets, values, calldatas, 1);
         assertEq(deep.defaultAdminCount(), 1);
         assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
         assertTrue(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP));
 
-        _executeAction(targets, values, calldatas, 1);
-        assertTrue(bootstrap.executed());
-        assertEq(bootstrap.endowmentAmount(), expectedEndowment);
-        assertEq(bootstrap.streamId(), nextStreamId);
-        assertEq(bootstrap.postEndowmentSupply(), supplyBefore + expectedEndowment);
+        _executeAction(targets, values, calldatas, 2);
+        assertEq(deep.totalSupply(), supplyBefore + expectedEndowment);
+        assertEq(deep.balanceOf(DeepstateAddresses.GOVERNOR), governorBalanceBefore + expectedEndowment);
+        assertEq(lockup.nextStreamId(), nextStreamId);
+        assertTrue(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP));
+        assertEq(deep.defaultAdminCount(), 1);
+        assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
+
+        _executeAction(targets, values, calldatas, 3);
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP));
         assertEq(deep.defaultAdminCount(), 1);
         assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
 
-        _executeAction(targets, values, calldatas, 2);
+        _executeAction(targets, values, calldatas, 4);
+        assertEq(deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP), expectedEndowment);
+        assertEq(lockup.nextStreamId(), nextStreamId);
+
+        _executeAction(targets, values, calldatas, 5);
+        assertEq(deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP), 0);
+        assertEq(deep.balanceOf(DeepstateAddresses.GOVERNOR), governorBalanceBefore);
+        assertEq(lockup.nextStreamId(), nextStreamId + 1);
+        _assertEndowmentStream(lockup, nextStreamId, uint40(block.timestamp), expectedEndowment);
+
+        _executeAction(targets, values, calldatas, 6);
         assertEq(deep.defaultAdminCount(), 2);
         assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
         assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.MINTER_CONTROLLER));
 
-        _executeAction(targets, values, calldatas, 3);
+        _executeAction(targets, values, calldatas, 7);
         assertEq(deep.defaultAdminCount(), 1);
         assertFalse(deep.hasRole(bytes32(0), DeepstateAddresses.GOVERNOR));
         assertTrue(deep.hasRole(bytes32(0), DeepstateAddresses.MINTER_CONTROLLER));
 
-        _executeAction(targets, values, calldatas, 4);
+        _executeAction(targets, values, calldatas, 8);
         assertTrue(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.MINTER_CONTROLLER));
         assertEq(minter.tokenAdministrationEndsAt(), block.timestamp + 730 days);
-        assertEq(minter.grossIssued(), supplyBefore + expectedEndowment);
 
-        _executeAction(targets, values, calldatas, 5);
+        _executeAction(targets, values, calldatas, 9);
         assertEq(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY), 1);
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.REWARDER_FACTORY));
 
-        _executeAction(targets, values, calldatas, 6);
+        _executeAction(targets, values, calldatas, 10);
+        assertEq(router.owner(), DeepstateAddresses.GOVERNOR);
+        assertEq(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID), address(0));
+
+        _executeAction(targets, values, calldatas, 11);
         assertEq(router.owner(), DeepstateAddresses.V1_CONTROLLER);
 
-        _executeAction(targets, values, calldatas, 7);
+        _executeAction(targets, values, calldatas, 12);
         assertEq(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY), 1);
 
-        _executeAction(targets, values, calldatas, 8);
-        address rewarder = factory.activeRewarder(DeepstateAddresses.NVDA_USDG_POOL_ID);
+        _executeAction(targets, values, calldatas, 13);
+        address rewarder = router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID);
         assertNotEq(rewarder, address(0));
         assertEq(deep.balanceOf(rewarder), _MARKET_FUNDING);
-        assertEq(factory.fundingCommitted(), _MARKET_FUNDING);
-        assertEq(minter.grossIssued(), deep.totalSupply());
         if (!vm.envOr("DGP001_TEST_PRUNED_RPC", false)) {
             assertEq(uint256(vm.load(DeepstateAddresses.ROUTER, _poolStateSlot())) & _BOTH_HOOK_FLAGS, _BOTH_HOOK_FLAGS);
         }
 
-        _executeAction(targets, values, calldatas, 9);
+        _executeAction(targets, values, calldatas, 14);
         assertEq(factory.operator(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
 
         assertEq(deep.totalSupply() - supplyBefore, expectedEndowment + _MARKET_FUNDING + _MARKET_VESTING);
-        assertEq(ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP).nextStreamId(), nextStreamId + 2);
+        assertEq(lockup.nextStreamId(), nextStreamId + 2);
         proposal.verifyPostconditions();
     }
 
@@ -248,7 +323,7 @@ contract DGP001Test is Test {
         assertEq(proposal.verifyExecution(), proposalId);
     }
 
-    function testGovernorExecutionRollsBackEveryEarlierActionWhenMigrationMintFails() public {
+    function testGovernorExecutionRollsBackEveryEarlierActionWhenMarketFundingFails() public {
         _setUpFork();
         _clearLegacyMarket();
         proposal.validateActivationPreconditions();
@@ -265,6 +340,11 @@ contract DGP001Test is Test {
         ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
 
         uint256 supplyBefore = deep.totalSupply();
+        uint256 governorBalanceBefore = deep.balanceOf(DeepstateAddresses.GOVERNOR);
+        uint256 governorAllowanceBefore = deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP);
+        uint256 sablierBalanceBefore = deep.balanceOf(DeepstateAddresses.SABLIER_LOCKUP);
+        uint256 bootstrapBalanceBefore = deep.balanceOf(DeepstateAddresses.DGP001_BOOTSTRAP);
+        uint256 endowmentBefore = bootstrap.endowmentAmount();
         uint256 streamBefore = lockup.nextStreamId();
         uint64 factoryNonceBefore = vm.getNonce(DeepstateAddresses.REWARDER_FACTORY);
         bool prunedRpc = vm.envOr("DGP001_TEST_PRUNED_RPC", false);
@@ -272,7 +352,7 @@ contract DGP001Test is Test {
         vm.mockCallRevert(
             DeepstateAddresses.MINTER_CONTROLLER,
             abi.encodeWithSelector(DeepstateMinterController.mint.selector),
-            abi.encodeWithSignature("InjectedMigrationMintFailure()")
+            abi.encodeWithSignature("InjectedMarketFundingFailure()")
         );
 
         vm.expectRevert();
@@ -293,21 +373,13 @@ contract DGP001Test is Test {
         assertFalse(deep.hasRole(bytes32(0), DeepstateAddresses.MINTER_CONTROLLER));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.MINTER_CONTROLLER));
-        assertFalse(bootstrap.executed());
-        assertEq(bootstrap.snapshotBlock(), 0);
-        assertEq(bootstrap.snapshotAt(), 0);
-        assertEq(bootstrap.snapshotToken0(), address(0));
-        assertEq(bootstrap.snapshotToken1(), address(0));
-        assertEq(bootstrap.token0Accrued(), 0);
-        assertEq(bootstrap.token1Accrued(), 0);
-        assertEq(bootstrap.totalAccrued(), 0);
-        assertEq(bootstrap.endowmentAmount(), 0);
-        assertEq(bootstrap.preexistingBalanceBurned(), 0);
-        assertEq(bootstrap.postEndowmentSupply(), 0);
-        assertEq(bootstrap.streamId(), 0);
-        assertEq(deep.balanceOf(DeepstateAddresses.DGP001_BOOTSTRAP), 0);
-        assertEq(deep.allowance(DeepstateAddresses.DGP001_BOOTSTRAP, DeepstateAddresses.SABLIER_LOCKUP), 0);
-        assertEq(minter.grossIssued(), 0);
+        assertEq(bootstrap.endowmentAmount(), endowmentBefore);
+        assertEq(deep.balanceOf(DeepstateAddresses.GOVERNOR), governorBalanceBefore);
+        assertEq(
+            deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP), governorAllowanceBefore
+        );
+        assertEq(deep.balanceOf(DeepstateAddresses.SABLIER_LOCKUP), sablierBalanceBefore);
+        assertEq(deep.balanceOf(DeepstateAddresses.DGP001_BOOTSTRAP), bootstrapBalanceBefore);
         assertEq(minter.tokenAdministrationEndsAt(), 0);
         assertEq(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY), 0);
         assertEq(
@@ -317,9 +389,7 @@ contract DGP001Test is Test {
         assertEq(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID), DeepstateAddresses.REWARDER);
         if (!prunedRpc) assertEq(vm.load(DeepstateAddresses.ROUTER, _poolStateSlot()), poolStateBefore);
         assertEq(factory.operator(), address(0));
-        assertEq(factory.fundingCommitted(), 0);
         assertEq(factory.nextDeploymentAt(), 0);
-        assertEq(factory.activeRewarder(DeepstateAddresses.NVDA_USDG_POOL_ID), address(0));
         assertEq(lockup.nextStreamId(), streamBefore);
         assertEq(vm.getNonce(DeepstateAddresses.REWARDER_FACTORY), factoryNonceBefore);
     }
@@ -339,28 +409,12 @@ contract DGP001Test is Test {
         assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
         assertEq(bootstrap.governor(), DeepstateAddresses.GOVERNOR);
         assertEq(address(bootstrap.deepstateToken()), DeepstateAddresses.DEEP);
-        assertEq(address(bootstrap.sablierLockup()), DeepstateAddresses.SABLIER_LOCKUP);
-        assertEq(address(bootstrap.legacyRewarder()), DeepstateAddresses.REWARDER);
-        assertEq(address(bootstrap.minterController()), DeepstateAddresses.MINTER_CONTROLLER);
-        assertEq(bootstrap.recipient(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        assertEq(bootstrap.endowmentAmount(), _currentLegacyEndowment());
+        assertGt(bootstrap.endowmentAmount(), 0);
         assertEq(v1Controller.owner(), DeepstateAddresses.GOVERNOR);
         assertEq(factory.owner(), DeepstateAddresses.GOVERNOR);
-        assertFalse(bootstrap.executed());
-        assertEq(bootstrap.snapshotBlock(), 0);
-        assertEq(bootstrap.snapshotAt(), 0);
-        assertEq(bootstrap.snapshotToken0(), address(0));
-        assertEq(bootstrap.snapshotToken1(), address(0));
-        assertEq(bootstrap.token0Accrued(), 0);
-        assertEq(bootstrap.token1Accrued(), 0);
-        assertEq(bootstrap.totalAccrued(), 0);
-        assertEq(bootstrap.endowmentAmount(), 0);
-        assertEq(bootstrap.preexistingBalanceBurned(), 0);
-        assertEq(bootstrap.postEndowmentSupply(), 0);
-        assertEq(bootstrap.streamId(), 0);
-        assertEq(minter.grossIssued(), 0);
         assertEq(minter.tokenAdministrationEndsAt(), 0);
         assertEq(factory.operator(), address(0));
-        assertEq(factory.fundingCommitted(), 0);
         assertEq(factory.nextDeploymentAt(), 0);
         assertEq(router.owner(), DeepstateAddresses.GOVERNOR);
         assertEq(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID), DeepstateAddresses.REWARDER);
@@ -369,6 +423,25 @@ contract DGP001Test is Test {
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.GOVERNOR));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.DGP001_BOOTSTRAP));
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), DeepstateAddresses.MINTER_CONTROLLER));
+    }
+
+    function _assertEndowmentStream(
+        ISablierDGP001View lockup,
+        uint256 streamId,
+        uint40 expectedStart,
+        uint256 expectedAmount
+    ) private view {
+        assertEq(lockup.ownerOf(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        assertEq(lockup.getRecipient(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        assertEq(lockup.getSender(streamId), DeepstateAddresses.GOVERNOR);
+        assertEq(address(lockup.getUnderlyingToken(streamId)), DeepstateAddresses.DEEP);
+        assertEq(lockup.getDepositedAmount(streamId), expectedAmount);
+        assertEq(lockup.getStartTime(streamId), expectedStart);
+        assertEq(lockup.getEndTime(streamId), expectedStart + 365 days);
+        assertEq(lockup.getCliffTime(streamId), 0);
+        assertEq(lockup.getGranularity(streamId), 1 seconds);
+        assertFalse(lockup.isCancelable(streamId));
+        assertFalse(lockup.isTransferable(streamId));
     }
 
     function _executeAction(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, uint256 index)

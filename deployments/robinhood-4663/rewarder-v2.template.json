@@ -18,13 +18,10 @@
   },
   "releasePolicy": {
     "note": "Governance-selected conservative release policy; these values are not discovered protocol facts.",
-    "minterLiveSupplyCap": "3000000000000000000000000000",
-    "minterGrossIssuanceCap": "3000000000000000000000000000",
-    "factoryLifetimeFundingBudget": "1000000000000000000000000000",
+    "minterMaxSupply": "3000000000000000000000000000",
     "factoryMarketFunding": "100000000000000000000000000",
     "factorySideEmissionCap": "50000000000000000000000000",
     "factoryEmissionDurationSeconds": "31536000",
-    "maximumFullyFundedMarkets": 10,
     "governanceTopUpSupported": false,
     "maximumLegacyEndowment": "300000000000000000000000000",
     "minimumActivationIssuanceHeadroom": "442857142857142857142857142"
@@ -104,7 +101,6 @@
         "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
         "0x548129a58bC230549DF7F9e33f27E77F6779ff0f",
         "0x83fB2739abd9963c5341E4A176D93a7E5Ee73445",
-        "3000000000000000000000000000",
         "3000000000000000000000000000"
       ],
       "deploymentTransactionHash": null,
@@ -119,7 +115,7 @@
       "predictedAddress": "0x46f59ca750D4781b882a8F92BE11F0b23f537932",
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
-        "0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5",
+        "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
         "0xE85ADBC03a6b52a2c9894c1BB525eC883ea156D7"
       ],
       "deploymentTransactionHash": null,
@@ -149,9 +145,7 @@
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476",
-        "0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5",
-        "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
-        "1000000000000000000000000000"
+        "0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5"
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
