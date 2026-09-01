@@ -54,7 +54,7 @@ interface ISafeDGP002View {
 contract DeployDGP002 is DeepstateProposalScript {
     address internal constant PROPOSER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
     uint256 internal constant EXPECTED_PROPOSAL_ID =
-        36_177_977_559_725_829_812_483_834_109_258_240_837_107_645_780_872_391_533_836_115_516_881_196_235_226;
+        107_977_751_241_266_383_486_075_365_246_030_414_368_568_059_459_668_144_684_817_193_989_900_136_520_703;
 
     address public constant VOLUNTEER_A = 0x1fb3A8192d00aDe0ddC0EEcB4D872149Eb9C4157;
     address public constant VOLUNTEER_B = 0x5715d61f99487abD65D1091b5d3a46c1b2879355;
@@ -68,7 +68,7 @@ contract DeployDGP002 is DeepstateProposalScript {
 
     uint256 private constant _ACTION_COUNT = 3;
     uint256 private constant _DGP001_PROPOSAL_ID =
-        3_129_422_573_715_232_763_191_445_708_321_076_080_578_208_958_120_505_855_986_403_290_789_525_128_455;
+        21_670_168_054_235_862_623_105_807_725_466_940_170_458_221_861_077_590_322_055_092_013_716_138_824_414;
     uint256 private constant _FACTORY_MINTER_ROLE = 1;
     uint256 private constant _FACTORY_HOOK_MANAGER_ROLE = 1;
     uint256 private constant _DGP001_MARKET_FUNDING = 100_000_000e18;

@@ -91,16 +91,16 @@ library DeepstateAddresses {
 
     // Deterministic Rewarder V2 system deployments. These addresses are fixed by the reviewed CREATE2 deployer,
     // salts, init code, constructor arguments, compiler settings, and pinned dependency revisions.
-    address internal constant MINTER_CONTROLLER = 0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5;
+    address internal constant MINTER_CONTROLLER = 0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa;
     bytes32 internal constant MINTER_CONTROLLER_CODEHASH =
-        0xaa7292db515a0de6a611bccd4f953a26e299c54adbad09920cb5630731d63dc5;
-    address internal constant DGP001_BOOTSTRAP = 0x46f59ca750D4781b882a8F92BE11F0b23f537932;
+        0x64aa352e16ca4357ca2a2d721576d6b6b7c935b86cb7910ab1f313aec066372f;
+    address internal constant DGP001_BOOTSTRAP = 0x310594e99815E00F7a8c866bd1578DC2Db00C975;
     bytes32 internal constant DGP001_BOOTSTRAP_CODEHASH =
-        0x5dbd6a010679b3dc1de4c62cb6cbfad824276ff75cbc783695fe748d1b332282;
+        0x54746ff520805e9f7fe31466c939b79b4664af53b2b65c33d445599f09e52606;
     address internal constant V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
     bytes32 internal constant V1_CONTROLLER_CODEHASH =
         0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc;
-    address internal constant REWARDER_FACTORY = 0xFF9E7971aB6E7111BB2F0aDA57a8E2c1256c3f98;
+    address internal constant REWARDER_FACTORY = 0xA847C1fE66D31b8f6416741971F89a958d9AC2D9;
     bytes32 internal constant REWARDER_FACTORY_CODEHASH =
-        0x8839004510aeb49e9725d929193c8deb2fff5f0950b65fdd22c6fae4ded93049;
+        0xf8b241f61c3bbcc6562c7ba64d40ec84da7511e9e49161bbb638d3ce2956af70;
 }

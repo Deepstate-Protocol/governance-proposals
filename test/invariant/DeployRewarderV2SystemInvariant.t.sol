@@ -217,18 +217,18 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 }
 
 contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
-    address internal constant EXPECTED_MINTER = 0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5;
-    address internal constant EXPECTED_BOOTSTRAP = 0x46f59ca750D4781b882a8F92BE11F0b23f537932;
+    address internal constant EXPECTED_MINTER = 0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa;
+    address internal constant EXPECTED_BOOTSTRAP = 0x310594e99815E00F7a8c866bd1578DC2Db00C975;
     address internal constant EXPECTED_V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
-    address internal constant EXPECTED_FACTORY = 0xFF9E7971aB6E7111BB2F0aDA57a8E2c1256c3f98;
+    address internal constant EXPECTED_FACTORY = 0xA847C1fE66D31b8f6416741971F89a958d9AC2D9;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
-        0xc36c59bdaf1845441031fec37a852bccc0780e13ac92c643612f34db191ecf6e;
+        0xf474c741a197c764621efb61e47e135b3901c53d1dd3bd2e5db4a63e15a7ca51;
     bytes32 internal constant EXPECTED_BOOTSTRAP_INIT_CODE_HASH =
-        0x4430bc05d7be72ddde468617ac1e6973c63a585d7cf64d6397eea763687a9f88;
+        0x51621e9b0a57fec483593d59d66e7355beb5def5a11476b9e4be4cb61ee0171d;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
         0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0x289a57fb940d16d403c809c232adb6e38ff9430a2fbb3ed5556e87b28c1a981e;
+        0x6c742d3e580c46a1e42b1dea97da9fe55604eb86c25956f335f83a3b38cab13a;
 
     DeployRewarderV2SystemInvariantHandler internal handler;
     DeployRewarderV2SystemInvariantHarness internal deployment;
