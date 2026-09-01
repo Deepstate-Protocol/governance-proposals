@@ -9,7 +9,7 @@ library DeepstateAddresses {
     uint256 internal constant CHAIN_ID = 4_663;
     uint48 internal constant GOVERNANCE_START = 1_788_074_638;
 
-    // Release policy, not protocol-discovered values. Changing any value creates a different CREATE2 deployment.
+    // Release policy, not protocol-discovered values.
     uint256 internal constant MINTER_MAX_SUPPLY = 3_000_000_000e18;
     uint256 internal constant MINIMUM_ACTIVATION_ISSUANCE_HEADROOM = 442_857_142_857_142_857_142_857_142;
 
@@ -84,13 +84,8 @@ library DeepstateAddresses {
     uint256 internal constant SABLIER_LOCKUP_MIN_FEE_USD = 0;
     uint256 internal constant SABLIER_MAX_FEE_USD = 10_000_000_000;
 
-    // Arachnid's canonical deterministic deployment proxy, used only after an explicit deployment confirmation.
-    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    bytes32 internal constant CREATE2_DEPLOYER_CODEHASH =
-        0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989;
-
-    // Deterministic Rewarder V2 system deployments. These addresses are fixed by the reviewed CREATE2 deployer,
-    // salts, init code, constructor arguments, compiler settings, and pinned dependency revisions.
+    // Pre-deployment model addresses. DeployContracts uses ordinary CREATE and prints the actual four addresses.
+    // Replace these four values with those receipts before registering either governance proposal.
     address internal constant MINTER_CONTROLLER = 0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa;
     bytes32 internal constant MINTER_CONTROLLER_CODEHASH =
         0x64aa352e16ca4357ca2a2d721576d6b6b7c935b86cb7910ab1f313aec066372f;

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "planned-not-deployed",
   "chain": {
     "name": "Robinhood Chain",
@@ -15,6 +15,11 @@
     "optimizerEnabled": true,
     "optimizerRuns": 200,
     "viaIR": true
+  },
+  "deployment": {
+    "method": "ordinary-create",
+    "script": "script/DeployContracts.s.sol:DeployContracts",
+    "singleRun": true
   },
   "releasePolicy": {
     "note": "Governance-selected conservative release policy; these values are not discovered protocol facts.",
@@ -84,18 +89,11 @@
       "comptrollerImplementationCodeHash": "0xc5211d5df605d1fdc4c38436af79384daf89cbf7b6b39e1882b405c3bb04c107",
       "nativeToken": "0x0000000000000000000000000000000000000000",
       "lockupMinFeeUSD8": "0"
-    },
-    "create2Deployer": {
-      "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
-      "runtimeCodeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
     }
   },
   "contracts": {
     "minterController": {
-      "salt": "0x304c43c720fd4782c53fdae386391a6648ceb66d5392726bdc48bc3afbb7e029",
-      "initCodeHash": "0xf474c741a197c764621efb61e47e135b3901c53d1dd3bd2e5db4a63e15a7ca51",
-      "expectedRuntimeCodeHash": "0x64aa352e16ca4357ca2a2d721576d6b6b7c935b86cb7910ab1f313aec066372f",
-      "predictedAddress": "0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa",
+      "address": null,
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
@@ -105,56 +103,55 @@
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
+      "deploymentBlockHash": null,
       "runtimeCodeHash": null,
       "sourceVerified": false
     },
     "dgp001Bootstrap": {
-      "salt": "0xa9d987fd2fc64a5101bf906ead9f947a9630478782ca6ed34786b4d62a940fd9",
-      "initCodeHash": "0x51621e9b0a57fec483593d59d66e7355beb5def5a11476b9e4be4cb61ee0171d",
-      "expectedRuntimeCodeHash": "0x54746ff520805e9f7fe31466c939b79b4664af53b2b65c33d445599f09e52606",
-      "predictedAddress": "0x310594e99815E00F7a8c866bd1578DC2Db00C975",
+      "address": null,
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x1DA24f6Bb623b9d1aFEae3F3146659A2662D6d27",
         "0xE85ADBC03a6b52a2c9894c1BB525eC883ea156D7"
       ],
+      "legacyToken0TotalAccrued": null,
+      "legacyToken1TotalAccrued": null,
+      "endowmentAmount": null,
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
+      "deploymentBlockHash": null,
       "runtimeCodeHash": null,
       "sourceVerified": false
     },
     "v1Controller": {
-      "salt": "0x082f06fa60ca7855e107a32607127f39acece481342eb9696ae09f1139dbe01a",
-      "initCodeHash": "0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32",
-      "expectedRuntimeCodeHash": "0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc",
-      "predictedAddress": "0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476",
+      "address": null,
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
         "0x6cf19308C22FC82ea620Fa0B3E94948d20f27B96"
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
+      "deploymentBlockHash": null,
       "runtimeCodeHash": null,
       "sourceVerified": false
     },
     "rewarderFactory": {
-      "salt": "0xa12385de33bf96081bec74e7fa1a97a0559c8d62d2d152d12f9f6be35ffb018a",
-      "initCodeHash": "0x6c742d3e580c46a1e42b1dea97da9fe55604eb86c25956f335f83a3b38cab13a",
-      "expectedRuntimeCodeHash": "0xf8b241f61c3bbcc6562c7ba64d40ec84da7511e9e49161bbb638d3ce2956af70",
-      "predictedAddress": "0xA847C1fE66D31b8f6416741971F89a958d9AC2D9",
+      "address": null,
       "constructorArguments": [
         "0x3DC3b787EBDC78bf916f4e30195C61c764C111Ff",
-        "0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476",
-        "0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa"
+        null,
+        null
       ],
       "deploymentTransactionHash": null,
       "deploymentBlock": null,
+      "deploymentBlockHash": null,
       "runtimeCodeHash": null,
       "sourceVerified": false
     }
   },
   "broadcast": {
     "broadcaster": null,
+    "startingNonce": null,
     "foundryBroadcastArtifact": null
   },
   "governanceActivation": {

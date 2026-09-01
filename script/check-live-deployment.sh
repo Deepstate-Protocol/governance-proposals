@@ -202,7 +202,6 @@ EXPECTED_SABLIER_COMPTROLLER_CODEHASH="$(solidity_bytes32 SABLIER_COMPTROLLER_CO
 EXPECTED_SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH="$(solidity_bytes32 SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH)"
 EXPECTED_SAFE_CODEHASH="$(solidity_bytes32 DEEPSTATE_INC_SAFE_CODEHASH)"
 EXPECTED_SAFE_SINGLETON_CODEHASH="$(solidity_bytes32 DEEPSTATE_INC_SAFE_SINGLETON_CODEHASH)"
-EXPECTED_CREATE2_DEPLOYER_CODEHASH="$(solidity_bytes32 CREATE2_DEPLOYER_CODEHASH)"
 EXPECTED_ROUTER_FEE_BPS="$(solidity_uint ROUTER_FEE_BPS)"
 EXPECTED_NVDA_USDG_POOL_ID="$(solidity_bytes32 NVDA_USDG_POOL_ID)"
 EXPECTED_SAFE_THRESHOLD="$(solidity_uint DEEPSTATE_INC_SAFE_THRESHOLD)"
@@ -235,7 +234,6 @@ SABLIER_LOCKUP="$(solidity_address SABLIER_LOCKUP)"
 SABLIER_COMPTROLLER="$(solidity_address SABLIER_COMPTROLLER)"
 SABLIER_COMPTROLLER_IMPLEMENTATION="$(solidity_address SABLIER_COMPTROLLER_IMPLEMENTATION)"
 SABLIER_COMPTROLLER_ADMIN="$(solidity_address SABLIER_COMPTROLLER_ADMIN)"
-CREATE2_DEPLOYER="$(solidity_address CREATE2_DEPLOYER)"
 
 chain_id="$(cast chain-id --rpc-url "$RPC_URL")"
 if [[ "$chain_id" != "$EXPECTED_CHAIN_ID" ]]; then
@@ -261,8 +259,7 @@ for contract_address in \
     "$DEEPSTATE_INC_SAFE_SINGLETON" \
     "$SABLIER_LOCKUP" \
     "$SABLIER_COMPTROLLER" \
-    "$SABLIER_COMPTROLLER_IMPLEMENTATION" \
-    "$CREATE2_DEPLOYER"; do
+    "$SABLIER_COMPTROLLER_IMPLEMENTATION"; do
     if [[ "$(cast code "$contract_address" --rpc-url "$RPC_URL" --block "$SNAPSHOT_BLOCK")" == "0x" ]]; then
         printf 'No contract code at %s\n' "$contract_address" >&2
         exit 1
@@ -284,8 +281,7 @@ for codehash_spec in \
     "Deepstate Inc Safe singleton:$DEEPSTATE_INC_SAFE_SINGLETON:$EXPECTED_SAFE_SINGLETON_CODEHASH" \
     "Sablier Lockup:$SABLIER_LOCKUP:$EXPECTED_SABLIER_LOCKUP_CODEHASH" \
     "Sablier Comptroller:$SABLIER_COMPTROLLER:$EXPECTED_SABLIER_COMPTROLLER_CODEHASH" \
-    "Sablier Comptroller implementation:$SABLIER_COMPTROLLER_IMPLEMENTATION:$EXPECTED_SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH" \
-    "CREATE2 deployer:$CREATE2_DEPLOYER:$EXPECTED_CREATE2_DEPLOYER_CODEHASH"; do
+    "Sablier Comptroller implementation:$SABLIER_COMPTROLLER_IMPLEMENTATION:$EXPECTED_SABLIER_COMPTROLLER_IMPLEMENTATION_CODEHASH"; do
     codehash_label="${codehash_spec%%:*}"
     codehash_rest="${codehash_spec#*:}"
     codehash_address="${codehash_rest%%:*}"
@@ -576,7 +572,6 @@ printf '  proposer votes: %s\n' "$proposer_votes"
 printf '  Sablier Lockup v4: %s\n' "$SABLIER_LOCKUP"
 printf '  Sablier replacement Comptroller: %s (%s, Lockup fee %s USD units)\n' \
     "$SABLIER_COMPTROLLER" "$EXPECTED_SABLIER_COMPTROLLER_VERSION" "$sablier_lockup_min_fee_usd"
-printf '  deterministic CREATE2 deployer: %s\n' "$CREATE2_DEPLOYER"
 printf '  Router fee: %s bps to %s\n' "$router_fee_bps" "$STATE"
 printf '  NVDA/USDG hook: %s\n' "$REWARDER"
 printf '  legacy Rewarder total accrued: USDG %s, NVDA %s\n' \

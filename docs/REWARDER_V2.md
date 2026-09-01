@@ -152,8 +152,9 @@ should not survive.
 | Emission duration | `365 days` |
 | Vesting duration | `365 days` |
 
-The factory deploys individual rewarders with `CREATE`; the Minter Controller, fixed-amount Bootstrap, V1 Controller, and
-Factory use the existing reviewed deterministic CREATE2 release. Unlinking a Rewarder from the Router stops normal
+The Factory and the production deployment script both use ordinary `CREATE`: the Factory creates individual Rewarders,
+while the single system script creates the Minter Controller, fixed-amount Bootstrap, V1 Controller, and Factory in
+dependency order. Unlinking a Rewarder from the Router stops normal
 Router hook callbacks but does not disable inherited permissionless distribution or change its funding. A separate
 optional burn leaves the Rewarder owned by the Factory and introduces no retirement state. If its stored cursor still
 matches the live order-book top, `distributeRewards` can lazily accrue after unlinking; after a separate balance burn, a
@@ -216,7 +217,7 @@ configuration drift, insufficient cap headroom, or incompatible Sablier state. M
 immediately before execution so the market does not need to remain unavailable throughout the voting period. These
 preflights are offchain release gates and are not assertions executed inside the Governor payload.
 
-Before proposal submission:
+Before proposal submission, one `DeployContracts` run performs deployment steps 2 through 5:
 
 1. Select and verify a compatible Sablier Lockup v4 deployment and its Comptroller on Robinhood Chain, including exact
    runtime code, administrator and upgrade authority, trust configuration, and protocol withdrawal fees.
@@ -225,8 +226,10 @@ Before proposal submission:
    `floor((token0 totalAccrued + token1 totalAccrued) * 30 / 100)`, so record both counters and the immutable result.
 4. Deploy `DeepstateV1Controller(GOVERNOR, ROUTER)`.
 5. Deploy `DeepstateRewarderFactory(GOVERNOR, V1_CONTROLLER, MINTER_CONTROLLER)`.
-6. Verify source, constructor immutables, runtime bytecode, ownership or Governor binding, pristine mutable state, and
-   deployment provenance for all four deterministic contracts.
+6. Record the four actual nonce-derived addresses, receipts, blocks, and runtime hashes, then verify source,
+   constructor immutables, ownership or Governor binding, pristine mutable state, and deployment provenance.
+7. Pin those actual addresses and runtime hashes in `DeepstateAddresses.sol`, regenerate both proposal IDs and fork
+   pins, and merge that review before registering DGP-001.
 
 The first proposal's preparation and activation process is expected to:
 
@@ -299,5 +302,5 @@ administration assertions.
 The concrete DGP must therefore introduce explicit pre/post-activation modes or update the registry and checker after
 execution. Use the pre-activation mode immediately before submission, prove the transition on a pinned fork, and run
 the DGP's `verifyExecution()` against fresh live state after the mined execution receipt. Before any later DGP is
-reviewed, record all four deterministic addresses and local-artifact runtime code hashes and promote the confirmed
+reviewed, record all four actual deployed addresses and runtime code hashes and promote the confirmed
 post-activation roles, ownership, fees, and hooks to the live baseline.

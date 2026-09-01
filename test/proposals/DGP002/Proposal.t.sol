@@ -6,26 +6,16 @@ import {Vm} from "forge-std/Vm.sol";
 
 import {DeployDGP001, IDeepstateV1DGP001View} from "../../../script/proposals/DGP001/Deploy.s.sol";
 import {DeployDGP002, ISablierDGP002View} from "../../../script/proposals/DGP002/Deploy.s.sol";
-import {DeployRewarderV2System} from "../../../script/DeployRewarderV2System.s.sol";
 import {DeepstateAddresses} from "../../../script/config/DeepstateAddresses.sol";
+import {DGP001Bootstrap} from "../../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
+import {DeepstateRewarderFactory} from "../../../src/DeepstateRewarderFactory.sol";
+import {DeepstateV1Controller} from "../../../src/DeepstateV1Controller.sol";
 import {IDeepstateGovernor} from "../../../src/interfaces/IDeepstateGovernor.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
 interface ILegacyRewarderDGP002 {
     function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt);
-}
-
-contract DGP002DeploymentHarness is DeployRewarderV2System {
-    function deployPinnedContracts() external {
-        DeploymentPlan memory plan = _plan();
-        _validateExistingDeployments(plan);
-        _deployIfMissing(MINTER_SALT, plan.minterInitCode, plan.minterController);
-        _deployIfMissing(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCode, plan.dgp001Bootstrap);
-        _deployIfMissing(V1_CONTROLLER_SALT, plan.v1InitCode, plan.v1Controller);
-        _deployIfMissing(FACTORY_SALT, plan.factoryInitCode, plan.rewarderFactory);
-        _validateExistingDeployments(plan);
-    }
 }
 
 contract DGP002Test is Test {
@@ -46,7 +36,6 @@ contract DGP002Test is Test {
 
     DeployDGP001 internal dgp001;
     DeployDGP002 internal proposal;
-    DGP002DeploymentHarness internal deployment;
 
     struct Snapshot {
         uint256 supply;
@@ -62,8 +51,7 @@ contract DGP002Test is Test {
     function setUp() public {
         dgp001 = new DeployDGP001();
         proposal = new DeployDGP002();
-        deployment = new DGP002DeploymentHarness();
-        vm.makePersistent(address(dgp001), address(proposal), address(deployment));
+        vm.makePersistent(address(dgp001), address(proposal));
     }
 
     function testProposalPayload() public view {
@@ -226,10 +214,42 @@ contract DGP002Test is Test {
         assertEq(block.number, FORK_BLOCK);
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
 
-        deployment.run();
-        deployment.deployPinnedContracts();
+        _deployModeledContracts();
         _executeDGP001ThroughGovernor();
         vm.clearMockedCalls();
+    }
+
+    /// @dev Constructor-executes the ordinary deployment bytecode at the provisional model addresses. Production
+    /// addresses are recorded after DeployContracts runs and replace these constants before proposal submission.
+    function _deployModeledContracts() private {
+        deployCodeTo(
+            "DeepstateMinterController.sol:DeepstateMinterController",
+            abi.encode(
+                DeepstateAddresses.GOVERNOR,
+                DeepstateAddresses.DEEP,
+                DeepstateAddresses.SABLIER_LOCKUP,
+                DeepstateAddresses.DEEPSTATE_INC_SAFE,
+                DeepstateAddresses.MINTER_MAX_SUPPLY
+            ),
+            DeepstateAddresses.MINTER_CONTROLLER
+        );
+        deployCodeTo(
+            "DGP001Bootstrap.sol:DGP001Bootstrap",
+            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER),
+            DeepstateAddresses.DGP001_BOOTSTRAP
+        );
+        deployCodeTo(
+            "DeepstateV1Controller.sol:DeepstateV1Controller",
+            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.ROUTER),
+            DeepstateAddresses.V1_CONTROLLER
+        );
+        deployCodeTo(
+            "DeepstateRewarderFactory.sol:DeepstateRewarderFactory",
+            abi.encode(
+                DeepstateAddresses.GOVERNOR, DeepstateAddresses.V1_CONTROLLER, DeepstateAddresses.MINTER_CONTROLLER
+            ),
+            DeepstateAddresses.REWARDER_FACTORY
+        );
     }
 
     function _executeDGP001ThroughGovernor() private {

@@ -1,7 +1,7 @@
 # Deepstate governance proposals
 
 Foundry project for authoring, reviewing, simulating, and submitting proposals to the live Deepstate Governor. The
-repository contains the hardened Rewarder V2 release candidate and deterministic deployment tooling, but no
+repository contains the hardened Rewarder V2 release candidate and ordinary deployment tooling, but no
 submission-ready governance proposal yet. DGP-001 now has an exact executable payload candidate and proposal-specific
 tests; it remains blocked from submission until the system contracts are deployed, receipts are recorded, the live
 market is prepared, and the final archive-fork lifecycle test passes. DGP-002 now has an exact three-mint payload and
@@ -23,10 +23,11 @@ pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinne
 adds only an owner-only function that burns the contract's complete reward-token balance. The protocol's reward math
 and accounting remain inherited rather than copied into this repository.
 
-The system contracts have not been deployed. The repository includes a read-only deterministic CREATE2 plan, release
-manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact fifteen-action
-Governor payload with a provisional pre-deployment ID. The payload is deliberately not submission-ready until its
-predicted targets are actual reviewed deployments and the final archive-fork release gates pass. See
+The system contracts have not been deployed. The repository includes one ordinary-`CREATE` script that deploys all
+four required contracts, a release manifest template, pinned live dependencies, a live Sablier compatibility test,
+and DGP-001's exact fifteen-action Governor payload with a provisional pre-deployment ID. The payload is deliberately
+not submission-ready until the deployment's actual addresses are recorded and pinned and the final archive-fork
+release gates pass. See
 [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
 the production release procedure. The proposal-specific external transaction sequences are recorded in
 [`docs/DGP-001-TRANSACTION-RUNBOOK.md`](docs/DGP-001-TRANSACTION-RUNBOOK.md) and
@@ -89,8 +90,11 @@ read-only archive proxy can be added later if untrusted pull requests must run p
 ## Repository layout
 
 ```text
-proposals/DGP-NNN.md                    voter-facing description body
-script/proposals/DGPNNN/Deploy.s.sol   proposal-specific submission script
+proposals/DGP-NNN.md                   voter-facing description body
+script/DeployContracts.s.sol           deploys the four system contracts in one ordinary-CREATE run
+script/DeployDGP001.s.sol              registers DGP-001 with the Governor
+script/DeployDGP002.s.sol              registers DGP-002 with the Governor
+script/proposals/DGPNNN/Deploy.s.sol   reviewed proposal payload implementation
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
 src/DGP001Bootstrap.sol                constructor-frozen endowment amount and temporary mint action for DGP-001
@@ -99,7 +103,6 @@ lib/deepstate-contracts/               pinned matching-engine source dependency
 lib/deepstate-protocol/                pinned protocol source, including the inherited Rewarder base
 script/DeepstateProposal.sol           deterministic payload validation and proposal ID
 script/DeepstateProposalScript.s.sol   chain, Governor, STATE, and launch preflight
-script/DeployRewarderV2System.s.sol    read-only plan and guarded idempotent CREATE2 deployment
 script/config/DeepstateAddresses.sol   canonical live deployment and release-policy registry
 deployments/robinhood-4663/            production release manifest template and completed records
 docs/DEPLOYMENT.md                     deployment, verification, and activation runbook
@@ -135,6 +138,29 @@ fresh Robinhood fork. `make invariants` runs the dedicated deployment, activatio
 state machines. See [`docs/INVARIANT_COVERAGE.md`](docs/INVARIANT_COVERAGE.md) for the condition-by-condition mapping
 and the assumptions that cannot be proven by an EVM test.
 
+## Production workflow: three scripts
+
+There are exactly three operator-facing scripts:
+
+1. `DeployContracts` deploys the Minter Controller, DGP-001 Bootstrap, V1 Controller, and Rewarder Factory in
+   one run using ordinary Solidity `new`/`CREATE` deployments.
+2. `DeployDGP001` registers DGP-001 with the live Governor after the four actual deployment addresses have been pinned.
+3. `DeployDGP002` registers DGP-002 after DGP-001 has executed and DGP-002's dependency pins have been refreshed.
+
+The first script is one command, although the chain records four contract-creation transactions. Because ordinary
+`CREATE` addresses depend on the broadcaster and nonce, the proposal scripts cannot safely be finalized before that
+deployment. Record the four addresses, Bootstrap endowment amount, receipts, blocks, and runtime hashes; then merge a
+small address-and-proposal-pin update before registering DGP-001. Do not substitute runtime environment addresses in a
+governance submission: the reviewed targets and proposal IDs remain compile-time pinned.
+
+Import private keys into Foundry's encrypted keystore; never paste a private key into a command or `.env` file:
+
+```bash
+cast wallet import deepstate --interactive
+```
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the three exact commands and the required handoff between them.
+
 ## Adding a proposal
 
 For `DGP-001`, copy the three files in `templates/proposal/` into these paths:
@@ -165,7 +191,7 @@ Generate the values to pin without submitting anything:
 
 ```bash
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "printProposal()" \
   --rpc-url robinhood \
   -vvvv
@@ -190,13 +216,13 @@ role_snapshot="$(cast block-number --rpc-url robinhood)"
 bash script/check-deep-role-history.sh "$role_snapshot"
 
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "validateSubmissionPreconditions()" \
   --rpc-url robinhood \
   -vvvv
 
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --rpc-url robinhood \
   --sender "$PROPOSER" \
   -vvvv
@@ -205,13 +231,13 @@ forge script \
 Only after the dry run and review succeed, import a key into Foundry's encrypted keystore and broadcast:
 
 ```bash
-cast wallet import deepstate-proposer --interactive
+cast wallet import deepstate --interactive
 
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --rpc-url robinhood \
   --sender "$PROPOSER" \
-  --account deepstate-proposer \
+  --account deepstate \
   --broadcast \
   --slow \
   -vvvv
@@ -222,7 +248,7 @@ the current proposal state:
 
 ```bash
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "verifySubmission()" \
   --rpc-url robinhood \
   -vvvv
@@ -264,13 +290,13 @@ role_snapshot="$(cast block-number --rpc-url robinhood)"
 bash script/check-deep-role-history.sh "$role_snapshot"
 
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "validateActivationPreconditions()" \
   --rpc-url robinhood \
   -vvvv
 
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "execute()" \
   --rpc-url robinhood \
   --sender "$EXECUTOR" \
@@ -287,7 +313,7 @@ broadcast receipt is mined, reopen live state in a fresh process so those checks
 
 ```bash
 forge script \
-  script/proposals/DGP001/Deploy.s.sol:DeployDGP001 \
+  script/DeployDGP001.s.sol:DeployDGP001 \
   --sig "verifyExecution()" \
   --rpc-url robinhood \
   -vvvv

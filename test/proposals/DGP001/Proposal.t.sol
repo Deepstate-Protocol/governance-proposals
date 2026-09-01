@@ -12,7 +12,6 @@ import {
     IDeepstateRoleAdminDGP001,
     ISablierDGP001View
 } from "../../../script/proposals/DGP001/Deploy.s.sol";
-import {DeployRewarderV2System} from "../../../script/DeployRewarderV2System.s.sol";
 import {DeepstateAddresses} from "../../../script/config/DeepstateAddresses.sol";
 import {DGP001Bootstrap} from "../../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
@@ -33,18 +32,6 @@ interface ILegacyRewarderDGP001 {
     function totalAccrued(address token) external view returns (uint96 accrued);
 }
 
-contract DGP001DeploymentHarness is DeployRewarderV2System {
-    function deployPinnedContracts() external {
-        DeploymentPlan memory plan = _plan();
-        _validateExistingDeployments(plan);
-        _deployIfMissing(MINTER_SALT, plan.minterInitCode, plan.minterController);
-        _deployIfMissing(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCode, plan.dgp001Bootstrap);
-        _deployIfMissing(V1_CONTROLLER_SALT, plan.v1InitCode, plan.v1Controller);
-        _deployIfMissing(FACTORY_SALT, plan.factoryInitCode, plan.rewarderFactory);
-        _validateExistingDeployments(plan);
-    }
-}
-
 contract DGP001Test is Test {
     uint256 internal constant FORK_BLOCK = 50358350;
     bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
@@ -61,12 +48,10 @@ contract DGP001Test is Test {
         0xdf941c235503a5d2e67aee5dea00f2965f99421c0d034bd77f924c05c66bf399;
 
     DeployDGP001 internal proposal;
-    DGP001DeploymentHarness internal deployment;
 
     function setUp() public {
         proposal = new DeployDGP001();
-        deployment = new DGP001DeploymentHarness();
-        vm.makePersistent(address(proposal), address(deployment));
+        vm.makePersistent(address(proposal));
     }
 
     function _setUpFork() private {
@@ -82,9 +67,41 @@ contract DGP001Test is Test {
         }
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
 
-        deployment.run();
-        deployment.deployPinnedContracts();
+        _deployModeledContracts();
         _assertPristineDeployment();
+    }
+
+    /// @dev Constructor-executes the ordinary deployment bytecode at the provisional model addresses. Production
+    /// addresses are recorded after DeployContracts runs and replace these constants before proposal submission.
+    function _deployModeledContracts() private {
+        deployCodeTo(
+            "DeepstateMinterController.sol:DeepstateMinterController",
+            abi.encode(
+                DeepstateAddresses.GOVERNOR,
+                DeepstateAddresses.DEEP,
+                DeepstateAddresses.SABLIER_LOCKUP,
+                DeepstateAddresses.DEEPSTATE_INC_SAFE,
+                DeepstateAddresses.MINTER_MAX_SUPPLY
+            ),
+            DeepstateAddresses.MINTER_CONTROLLER
+        );
+        deployCodeTo(
+            "DGP001Bootstrap.sol:DGP001Bootstrap",
+            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER),
+            DeepstateAddresses.DGP001_BOOTSTRAP
+        );
+        deployCodeTo(
+            "DeepstateV1Controller.sol:DeepstateV1Controller",
+            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.ROUTER),
+            DeepstateAddresses.V1_CONTROLLER
+        );
+        deployCodeTo(
+            "DeepstateRewarderFactory.sol:DeepstateRewarderFactory",
+            abi.encode(
+                DeepstateAddresses.GOVERNOR, DeepstateAddresses.V1_CONTROLLER, DeepstateAddresses.MINTER_CONTROLLER
+            ),
+            DeepstateAddresses.REWARDER_FACTORY
+        );
     }
 
     function testProposalPayload() public {
