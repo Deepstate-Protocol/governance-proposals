@@ -7,10 +7,7 @@ import {Vm} from "forge-std/Vm.sol";
 import {DeployDGP001, IDeepstateV1DGP001View} from "../../../script/proposals/DGP001/Deploy.s.sol";
 import {DeployDGP002, ISablierDGP002View} from "../../../script/proposals/DGP002/Deploy.s.sol";
 import {DeepstateAddresses} from "../../../script/config/DeepstateAddresses.sol";
-import {DGP001Bootstrap} from "../../../src/DGP001Bootstrap.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
-import {DeepstateRewarderFactory} from "../../../src/DeepstateRewarderFactory.sol";
-import {DeepstateV1Controller} from "../../../src/DeepstateV1Controller.sol";
 import {IDeepstateGovernor} from "../../../src/interfaces/IDeepstateGovernor.sol";
 import {DeepstateToken} from "deepstate-protocol/DeepstateToken.sol";
 
@@ -19,10 +16,10 @@ interface ILegacyRewarderDGP002 {
 }
 
 contract DGP002Test is Test {
-    uint256 internal constant FORK_BLOCK = 50358350;
-    bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
+    uint256 internal constant FORK_BLOCK = 52005951;
+    bytes32 internal constant FORK_BLOCK_HASH = 0x171944f34f37a0ec4bdc941a27968441c513039f841a5acdc5b404208cec3c90;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x6437cd5365c26eee8f7cb5c9a954432ca7ace5ed69007d2d64e67874e9c308e0;
+        0x94722711019d3c5904f9d5d4c90cfc7d9d056d3304f0f1ceb9422145fb8d0b83;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _COMBINED_ISSUANCE = 14_285_714_285714285714285713;
@@ -214,42 +211,8 @@ contract DGP002Test is Test {
         assertEq(block.number, FORK_BLOCK);
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
 
-        _deployModeledContracts();
         _executeDGP001ThroughGovernor();
         vm.clearMockedCalls();
-    }
-
-    /// @dev Constructor-executes the ordinary deployment bytecode at the provisional model addresses. Production
-    /// addresses are recorded after DeployContracts runs and replace these constants before proposal submission.
-    function _deployModeledContracts() private {
-        deployCodeTo(
-            "DeepstateMinterController.sol:DeepstateMinterController",
-            abi.encode(
-                DeepstateAddresses.GOVERNOR,
-                DeepstateAddresses.DEEP,
-                DeepstateAddresses.SABLIER_LOCKUP,
-                DeepstateAddresses.DEEPSTATE_INC_SAFE,
-                DeepstateAddresses.MINTER_MAX_SUPPLY
-            ),
-            DeepstateAddresses.MINTER_CONTROLLER
-        );
-        deployCodeTo(
-            "DGP001Bootstrap.sol:DGP001Bootstrap",
-            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER),
-            DeepstateAddresses.DGP001_BOOTSTRAP
-        );
-        deployCodeTo(
-            "DeepstateV1Controller.sol:DeepstateV1Controller",
-            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.ROUTER),
-            DeepstateAddresses.V1_CONTROLLER
-        );
-        deployCodeTo(
-            "DeepstateRewarderFactory.sol:DeepstateRewarderFactory",
-            abi.encode(
-                DeepstateAddresses.GOVERNOR, DeepstateAddresses.V1_CONTROLLER, DeepstateAddresses.MINTER_CONTROLLER
-            ),
-            DeepstateAddresses.REWARDER_FACTORY
-        );
     }
 
     function _executeDGP001ThroughGovernor() private {
@@ -294,7 +257,8 @@ contract DGP002Test is Test {
         IDeepstateV1DGP001View router = IDeepstateV1DGP001View(DeepstateAddresses.ROUTER);
         bytes32 bookId = _PINNED_ACTIVE_BOOK_ID;
 
-        // This sequential test starts before either proposal. It models the operational cancellation phase required
+        // This sequential test starts after the production deployment but before either proposal. It models the
+        // operational cancellation phase required
         // by DGP-001 while retaining real Router hook writes and every other archive-fork dependency interaction.
         vm.mockCall(
             DeepstateAddresses.ROUTER,

@@ -33,15 +33,15 @@ interface ILegacyRewarderDGP001 {
 }
 
 contract DGP001Test is Test {
-    uint256 internal constant FORK_BLOCK = 50358350;
-    bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
+    uint256 internal constant FORK_BLOCK = 52005951;
+    bytes32 internal constant FORK_BLOCK_HASH = 0x171944f34f37a0ec4bdc941a27968441c513039f841a5acdc5b404208cec3c90;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0xec3d4f22e5552fcfca7034914cef9d3750c11898aec366ce28fcdffc8bb5b660;
+        0x921c011db66ae4d02eb97defdb93d76a84aff44ac0fd406399f3d0f462cfeed0;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _MARKET_FUNDING = 100_000_000e18;
     uint256 private constant _MARKET_VESTING = _MARKET_FUNDING * 30 / 70;
-    uint128 private constant _ENDOWMENT_AMOUNT = 44_656_649_085_084_309_261_855_700;
+    uint128 private constant _ENDOWMENT_AMOUNT = 48_594_966_854_085_794_406_041_707;
     uint256 private constant _POOL_STATE_MAPPING_SLOT = 2;
     uint256 private constant _BOTH_HOOK_FLAGS = (uint256(1) << 254) | (uint256(1) << 255);
     bytes32 private constant _PINNED_ACTIVE_BOOK_ID =
@@ -67,41 +67,7 @@ contract DGP001Test is Test {
         }
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
 
-        _deployModeledContracts();
         _assertPristineDeployment();
-    }
-
-    /// @dev Constructor-executes the ordinary deployment bytecode at the provisional model addresses. Production
-    /// addresses are recorded after DeployContracts runs and replace these constants before proposal submission.
-    function _deployModeledContracts() private {
-        deployCodeTo(
-            "DeepstateMinterController.sol:DeepstateMinterController",
-            abi.encode(
-                DeepstateAddresses.GOVERNOR,
-                DeepstateAddresses.DEEP,
-                DeepstateAddresses.SABLIER_LOCKUP,
-                DeepstateAddresses.DEEPSTATE_INC_SAFE,
-                DeepstateAddresses.MINTER_MAX_SUPPLY
-            ),
-            DeepstateAddresses.MINTER_CONTROLLER
-        );
-        deployCodeTo(
-            "DGP001Bootstrap.sol:DGP001Bootstrap",
-            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER),
-            DeepstateAddresses.DGP001_BOOTSTRAP
-        );
-        deployCodeTo(
-            "DeepstateV1Controller.sol:DeepstateV1Controller",
-            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.ROUTER),
-            DeepstateAddresses.V1_CONTROLLER
-        );
-        deployCodeTo(
-            "DeepstateRewarderFactory.sol:DeepstateRewarderFactory",
-            abi.encode(
-                DeepstateAddresses.GOVERNOR, DeepstateAddresses.V1_CONTROLLER, DeepstateAddresses.MINTER_CONTROLLER
-            ),
-            DeepstateAddresses.REWARDER_FACTORY
-        );
     }
 
     function testProposalPayload() public {
@@ -321,23 +287,99 @@ contract DGP001Test is Test {
         assertEq(proposalId, proposal.expectedProposalId());
         assertEq(governor.proposalProposer(proposalId), proposal.proposer());
         assertFalse(governor.proposalNeedsQueuing(proposalId));
+        assertEq(governor.state(proposalId), 0); // Pending
 
         uint256 snapshot = governor.proposalSnapshot(proposalId);
         vm.warp(snapshot + 1);
+        assertEq(governor.state(proposalId), 1); // Active
         assertGe(governor.getVotes(QUORUM_VOTER, snapshot), governor.quorum(snapshot));
         vm.prank(QUORUM_VOTER);
         governor.castVote(proposalId, 1);
+        assertEq(governor.state(proposalId), 1); // Active until the deadline
 
         vm.warp(governor.proposalDeadline(proposalId) + 1);
-        assertEq(governor.state(proposalId), 4);
+        assertEq(governor.state(proposalId), 4); // Succeeded
 
         // Operationally prepare the market only after voting succeeds, then reopen every execution-time gate.
         _clearLegacyMarket();
         proposal.validateActivationPreconditions();
+
+        DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
+        DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
+        DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
+        DeepstateV1Controller v1Controller = DeepstateV1Controller(DeepstateAddresses.V1_CONTROLLER);
+        DeepstateRewarderFactory factory = DeepstateRewarderFactory(DeepstateAddresses.REWARDER_FACTORY);
+        IDeepstateV1 router = IDeepstateV1(DeepstateAddresses.ROUTER);
+        ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
+        uint256 supplyBefore = deep.totalSupply();
+        uint256 streamIdBefore = lockup.nextStreamId();
+        uint40 executedAt = uint40(block.timestamp);
+        address expectedRewarder = vm.computeCreateAddress(
+            DeepstateAddresses.REWARDER_FACTORY, vm.getNonce(DeepstateAddresses.REWARDER_FACTORY)
+        );
+
         governor.execute(targets, values, calldatas, keccak256(bytes(description)));
 
-        assertEq(governor.state(proposalId), 7);
+        assertEq(governor.state(proposalId), 7); // Executed
+        assertEq(deep.totalSupply() - supplyBefore, bootstrap.endowmentAmount() + _MARKET_FUNDING + _MARKET_VESTING);
+        assertEq(lockup.nextStreamId(), streamIdBefore + 2);
+        _assertEndowmentStream(lockup, streamIdBefore, executedAt, bootstrap.endowmentAmount());
+        assertEq(router.owner(), DeepstateAddresses.V1_CONTROLLER);
+        assertEq(router.poolHook(DeepstateAddresses.NVDA_USDG_POOL_ID), expectedRewarder);
+        assertEq(deep.balanceOf(expectedRewarder), _MARKET_FUNDING);
+        assertEq(minter.rolesOf(DeepstateAddresses.REWARDER_FACTORY), 1);
+        assertEq(v1Controller.rolesOf(DeepstateAddresses.REWARDER_FACTORY), 1);
+        assertEq(factory.operator(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
         assertEq(proposal.verifyExecution(), proposalId);
+
+        vm.expectRevert();
+        governor.execute(targets, values, calldatas, keccak256(bytes(description)));
+        assertEq(governor.state(proposalId), 7);
+    }
+
+    function testGovernorAndRewarderFactoryCanMintAfterDGP001() public {
+        _setUpFork();
+        IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
+            proposal.proposal();
+        uint256 proposalId = _passProposalToSucceeded(governor, targets, values, calldatas, description);
+
+        _clearLegacyMarket();
+        proposal.validateActivationPreconditions();
+        governor.execute(targets, values, calldatas, keccak256(bytes(description)));
+        assertEq(proposal.verifyExecution(), proposalId);
+
+        DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
+        DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
+        ISablierDGP001View lockup = ISablierDGP001View(DeepstateAddresses.SABLIER_LOCKUP);
+        address governorMintRecipient = address(0xA11CE);
+        address factoryMintRecipient = address(0xB0B);
+        uint256 primaryAmount = 70e18;
+        uint256 vestingAmount = 30e18;
+        uint256 supplyBefore = deep.totalSupply();
+        uint256 streamIdBefore = lockup.nextStreamId();
+
+        vm.prank(DeepstateAddresses.GOVERNOR);
+        uint256 governorStreamId = minter.mint(governorMintRecipient, primaryAmount);
+        assertEq(governorStreamId, streamIdBefore);
+        assertEq(deep.balanceOf(governorMintRecipient), primaryAmount);
+        _assertMinterStream(lockup, governorStreamId, uint40(block.timestamp), vestingAmount);
+
+        vm.prank(DeepstateAddresses.REWARDER_FACTORY);
+        uint256 factoryStreamId = minter.mint(factoryMintRecipient, primaryAmount);
+        assertEq(factoryStreamId, streamIdBefore + 1);
+        assertEq(deep.balanceOf(factoryMintRecipient), primaryAmount);
+        _assertMinterStream(lockup, factoryStreamId, uint40(block.timestamp), vestingAmount);
+
+        assertEq(deep.totalSupply() - supplyBefore, 2 * (primaryAmount + vestingAmount));
+        assertEq(lockup.nextStreamId(), streamIdBefore + 2);
+        assertEq(deep.balanceOf(DeepstateAddresses.MINTER_CONTROLLER), 0);
+        assertEq(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP), 0);
+        assertEq(governor.state(proposalId), 7);
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
+        minter.mint(address(0xC0FFEE), primaryAmount);
     }
 
     function testGovernorExecutionRollsBackEveryEarlierActionWhenMarketFundingFails() public {
@@ -426,7 +468,8 @@ contract DGP001Test is Test {
         assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
         assertEq(bootstrap.governor(), DeepstateAddresses.GOVERNOR);
         assertEq(address(bootstrap.deepstateToken()), DeepstateAddresses.DEEP);
-        assertEq(bootstrap.endowmentAmount(), _currentLegacyEndowment());
+        assertEq(bootstrap.endowmentAmount(), _ENDOWMENT_AMOUNT);
+        assertGe(_currentLegacyEndowment(), bootstrap.endowmentAmount());
         assertGt(bootstrap.endowmentAmount(), 0);
         assertEq(v1Controller.owner(), DeepstateAddresses.GOVERNOR);
         assertEq(factory.owner(), DeepstateAddresses.GOVERNOR);
@@ -451,6 +494,25 @@ contract DGP001Test is Test {
         assertEq(lockup.ownerOf(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
         assertEq(lockup.getRecipient(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
         assertEq(lockup.getSender(streamId), DeepstateAddresses.GOVERNOR);
+        assertEq(address(lockup.getUnderlyingToken(streamId)), DeepstateAddresses.DEEP);
+        assertEq(lockup.getDepositedAmount(streamId), expectedAmount);
+        assertEq(lockup.getStartTime(streamId), expectedStart);
+        assertEq(lockup.getEndTime(streamId), expectedStart + 365 days);
+        assertEq(lockup.getCliffTime(streamId), 0);
+        assertEq(lockup.getGranularity(streamId), 1 seconds);
+        assertFalse(lockup.isCancelable(streamId));
+        assertFalse(lockup.isTransferable(streamId));
+    }
+
+    function _assertMinterStream(
+        ISablierDGP001View lockup,
+        uint256 streamId,
+        uint40 expectedStart,
+        uint256 expectedAmount
+    ) private view {
+        assertEq(lockup.ownerOf(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        assertEq(lockup.getRecipient(streamId), DeepstateAddresses.DEEPSTATE_INC_SAFE);
+        assertEq(lockup.getSender(streamId), DeepstateAddresses.MINTER_CONTROLLER);
         assertEq(address(lockup.getUnderlyingToken(streamId)), DeepstateAddresses.DEEP);
         assertEq(lockup.getDepositedAmount(streamId), expectedAmount);
         assertEq(lockup.getStartTime(streamId), expectedStart);
@@ -490,7 +552,7 @@ contract DGP001Test is Test {
         IDeepstateV1DGP001 router = IDeepstateV1DGP001(DeepstateAddresses.ROUTER);
         bytes32 bookId = _PINNED_ACTIVE_BOOK_ID;
 
-        // The reviewed fork is deliberately pre-deployment and the live book is not yet operationally prepared.
+        // The reviewed fork contains the production deployment and the live book is not yet operationally prepared.
         // Model the observable result of the user/keeper claimant-registration and cancellation phase while leaving
         // immutable identities and cumulative legacy accrual untouched. A final release fork must observe these four
         // zeroes naturally before the proposal is executed.
