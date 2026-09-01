@@ -27,6 +27,7 @@ contract InvariantDeploymentLegacyRewarderMock {
 
 contract DeployContractsInvariantHandler is Test {
     uint256 internal constant MAX_BUNDLES = 4;
+    uint256 internal constant DEPLOYER_PRIVATE_KEY = 0xA11CE;
 
     DeployContracts public immutable DEPLOYMENT_SCRIPT;
     address[] public minters;
@@ -44,6 +45,7 @@ contract DeployContractsInvariantHandler is Test {
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.ROUTER, address(codeMock).code);
         vm.etch(DeepstateAddresses.REWARDER, address(legacyRewarderMock).code);
+        vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(DEPLOYER_PRIVATE_KEY));
 
         DEPLOYMENT_SCRIPT = new DeployContracts();
     }

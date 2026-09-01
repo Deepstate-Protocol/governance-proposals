@@ -31,12 +31,14 @@ bash script/check-dependency-layout.sh
 
 Do not initialize submodules recursively. `git status --porcelain=v1` must print nothing.
 
-Put only the RPC URL in an ignored `.env`; never put a private key there:
+Copy the environment template and put the gas-funded deployer's private key in the ignored `.env` file:
 
 ```bash
 cp .env.example .env
 chmod 600 .env
-# Set ROBINHOOD_RPC_URL in .env to a reviewed archive-capable endpoint.
+# Edit .env:
+# ROBINHOOD_RPC_URL=https://your-reviewed-archive-endpoint
+# DEPLOYER_PRIVATE_KEY=0xYOUR_DEPLOYER_PRIVATE_KEY
 
 set -a
 source .env
@@ -45,12 +47,12 @@ set +a
 cast chain-id --rpc-url "$ROBINHOOD_RPC_URL"
 ```
 
-The chain ID must be `4663`.
+The chain ID must be `4663`. `.env` is gitignored; never commit or paste the populated key into a command.
 
-## 2. Import the key safely
+## 2. Prepare the governance proposer key
 
-Foundry stores an imported key in its encrypted keystore. This command prompts for the private key and a keystore
-password without putting either value in the repository or command line:
+The deployer private key is used only by `DeployContracts`. DGP-001 and DGP-002 are registered separately by the
+pinned governance proposer. Import that proposer key into Foundry's encrypted keystore:
 
 ```bash
 cast wallet import deepstate --interactive
@@ -58,12 +60,12 @@ export SIGNER="$(cast wallet address --account deepstate)"
 printf 'Signer: %s\n' "$SIGNER"
 ```
 
-For the three-command workflow, `deepstate` must resolve to the exact pinned proposer
+For proposal registration, `deepstate` must resolve to the exact pinned proposer
 `0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2`, have enough delegated STATE votes at the Governor's clock checkpoint, and
-hold enough Robinhood native token for gas. The deployment itself gives this signer no protocol authority.
+hold enough Robinhood native token for gas. The contract deployer may be a different gas-funded EOA, and deployment
+gives it no ownership, roles, or other protocol authority.
 
-Do not pass a raw private key with `--private-key`, export one in an environment variable, paste one into shell history,
-or commit one anywhere. A separate gas-only deployer is supported, but is not required for this workflow.
+Never put either private key directly on a command line or commit the populated `.env` file.
 
 ## 3. Run the release gates
 
@@ -83,8 +85,6 @@ First simulate the single system script without `--broadcast`:
 ```bash
 forge script script/DeployContracts.s.sol:DeployContracts \
   --rpc-url "$ROBINHOOD_RPC_URL" \
-  --sender "$SIGNER" \
-  --account deepstate \
   -vvvv
 ```
 
@@ -93,8 +93,6 @@ Review the broadcaster, nonce, gas, constructor arguments, and four reported add
 ```bash
 forge script script/DeployContracts.s.sol:DeployContracts \
   --rpc-url "$ROBINHOOD_RPC_URL" \
-  --sender "$SIGNER" \
-  --account deepstate \
   --broadcast \
   --slow \
   -vvvv

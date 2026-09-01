@@ -25,6 +25,8 @@ contract DeploymentLegacyRewarderMock {
 }
 
 contract DeployContractsTest is Test {
+    uint256 internal constant DEPLOYER_PRIVATE_KEY = 0xA11CE;
+
     DeployContracts internal deploymentScript;
 
     function setUp() public {
@@ -36,18 +38,20 @@ contract DeployContractsTest is Test {
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.ROUTER, address(codeMock).code);
         vm.etch(DeepstateAddresses.REWARDER, address(legacyRewarderMock).code);
+        vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(DEPLOYER_PRIVATE_KEY));
 
         deploymentScript = new DeployContracts();
     }
 
     function test_RunDeploysOneCorrectlyWiredFourContractBundle() public {
-        uint64 startingNonce = vm.getNonce(DEFAULT_SENDER);
+        address deployer = vm.addr(DEPLOYER_PRIVATE_KEY);
+        uint64 startingNonce = vm.getNonce(deployer);
         DeployContracts.Deployment memory deployed = deploymentScript.run();
 
-        assertEq(address(deployed.minterController), vm.computeCreateAddress(DEFAULT_SENDER, startingNonce));
-        assertEq(address(deployed.dgp001Bootstrap), vm.computeCreateAddress(DEFAULT_SENDER, startingNonce + 1));
-        assertEq(address(deployed.v1Controller), vm.computeCreateAddress(DEFAULT_SENDER, startingNonce + 2));
-        assertEq(address(deployed.rewarderFactory), vm.computeCreateAddress(DEFAULT_SENDER, startingNonce + 3));
+        assertEq(address(deployed.minterController), vm.computeCreateAddress(deployer, startingNonce));
+        assertEq(address(deployed.dgp001Bootstrap), vm.computeCreateAddress(deployer, startingNonce + 1));
+        assertEq(address(deployed.v1Controller), vm.computeCreateAddress(deployer, startingNonce + 2));
+        assertEq(address(deployed.rewarderFactory), vm.computeCreateAddress(deployer, startingNonce + 3));
         _assertDeployment(deployed);
     }
 

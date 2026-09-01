@@ -38,7 +38,7 @@ check-live:
 
 deploy-contracts:
 	forge script script/DeployContracts.s.sol:DeployContracts \
-		--rpc-url robinhood --account "$(ACCOUNT)" --broadcast --slow -vvvv
+		--rpc-url robinhood --broadcast --slow -vvvv
 
 register-dgp-001:
 	forge script script/DeployDGP001.s.sol:DeployDGP001 \

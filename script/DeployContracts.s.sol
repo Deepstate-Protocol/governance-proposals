@@ -27,7 +27,8 @@ contract DeployContracts is Script {
             revert UnsupportedChain(block.chainid, DeepstateAddresses.CHAIN_ID);
         }
 
-        vm.startBroadcast();
+        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        vm.startBroadcast(deployerPrivateKey);
 
         deployment.minterController = new DeepstateMinterController(
             DeepstateAddresses.GOVERNOR,

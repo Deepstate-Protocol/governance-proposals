@@ -153,11 +153,17 @@ deployment. Record the four addresses, Bootstrap endowment amount, receipts, blo
 small address-and-proposal-pin update before registering DGP-001. Do not substitute runtime environment addresses in a
 governance submission: the reviewed targets and proposal IDs remain compile-time pinned.
 
-Import private keys into Foundry's encrypted keystore; never paste a private key into a command or `.env` file:
+The first script reads the gas-funded deployer's key from a gitignored `.env` file:
 
 ```bash
-cast wallet import deepstate --interactive
+cp .env.example .env
+chmod 600 .env
+# Set DEPLOYER_PRIVATE_KEY=0x... and ROBINHOOD_RPC_URL=... in .env.
+make deploy-contracts
 ```
+
+Deployment gives that EOA no contract ownership or roles. Proposal registration uses the separately pinned proposer;
+import that key into Foundry's encrypted keystore as described in the deployment guide.
 
 See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the three exact commands and the required handoff between them.
 
