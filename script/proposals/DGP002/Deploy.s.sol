@@ -54,7 +54,7 @@ interface ISafeDGP002View {
 contract DeployDGP002 is DeepstateProposalScript {
     address internal constant PROPOSER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
     uint256 internal constant EXPECTED_PROPOSAL_ID =
-        83_037_234_672_736_451_188_274_336_874_984_718_683_591_537_512_257_021_355_069_490_020_204_051_423_628;
+        28_034_037_032_090_832_425_038_762_034_002_447_947_784_892_879_966_140_311_289_639_317_188_070_338_168;
 
     address public constant VOLUNTEER_A = 0x1fb3A8192d00aDe0ddC0EEcB4D872149Eb9C4157;
     address public constant VOLUNTEER_B = 0x5715d61f99487abD65D1091b5d3a46c1b2879355;
@@ -88,22 +88,23 @@ contract DeployDGP002 is DeepstateProposalScript {
         return EXPECTED_PROPOSAL_ID;
     }
 
-    /// @notice Reopens the post-DGP-001 submission gates without changing state.
+    /// @notice Reopens the concurrent-submission gates without changing state.
+    /// @dev DGP-001 must be registered with its exact proposer, but need not have passed or executed yet.
     function validateSubmissionPreconditions() external view {
-        _validatePreconditions(true);
+        _validateSubmissionPreconditions();
     }
 
     /// @notice Reopens the post-DGP-001 execution gates without changing state.
     function validateExecutionPreconditions() external view {
-        _validatePreconditions(false);
+        _validateExecutionPreconditions();
     }
 
     function _beforeSubmission() internal view override {
-        _validatePreconditions(true);
+        _validateSubmissionPreconditions();
     }
 
     function _beforeExecution() internal view override {
-        _validatePreconditions(false);
+        _validateExecutionPreconditions();
     }
 
     /// @notice Runs the immediate DGP-002 postconditions without requiring a registered proposal.
@@ -131,7 +132,36 @@ contract DeployDGP002 is DeepstateProposalScript {
         description = vm.readFile("proposals/DGP-002.md");
     }
 
-    function _validatePreconditions(bool requireFullGovernanceWindow) private view {
+    function _validateSubmissionPreconditions() private view {
+        DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
+        DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
+        IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
+
+        _validateCodeAndExternalDependencies();
+
+        // Registration is allowed while DGP-001 is Pending, Active, Succeeded, or Executed. The exact registered
+        // proposer proves the pinned DGP-001 exists; execution performs the strict state-7 and activation checks.
+        _pre(governor.proposalProposer(_DGP001_PROPOSAL_ID) == PROPOSER, 7);
+        _pre(minter.owner() == DeepstateAddresses.GOVERNOR, 8);
+        _pre(DeepstateV1Controller(DeepstateAddresses.V1_CONTROLLER).owner() == DeepstateAddresses.GOVERNOR, 9);
+        _pre(DeepstateRewarderFactory(DeepstateAddresses.REWARDER_FACTORY).owner() == DeepstateAddresses.GOVERNOR, 10);
+        _pre(address(minter.deepstateToken()) == DeepstateAddresses.DEEP, 11);
+        _pre(address(minter.sablierLockup()) == DeepstateAddresses.SABLIER_LOCKUP, 12);
+        _pre(minter.recipient() == DeepstateAddresses.DEEPSTATE_INC_SAFE, 13);
+        _pre(minter.maxSupply() == DeepstateAddresses.MINTER_MAX_SUPPLY, 14);
+        _pre(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT == TOTAL_PRIMARY_MINT, 47);
+        _pre(_calculatedVesting(minter) == TOTAL_VESTING_AMOUNT, 48);
+        _pre(
+            VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS() / minter.PRIMARY_ALLOCATION_BPS()
+                == VESTING_PER_MINT,
+            49
+        );
+        _pre(bootstrap.governor() == DeepstateAddresses.GOVERNOR, 74);
+        _pre(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 76);
+        _pre(bootstrap.endowmentAmount() != 0, 80);
+    }
+
+    function _validateExecutionPreconditions() private view {
         DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
         DGP001Bootstrap bootstrap = DGP001Bootstrap(DeepstateAddresses.DGP001_BOOTSTRAP);
         DeepstateMinterController minter = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER);
@@ -140,13 +170,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         IDeepstateV1 router = IDeepstateV1(DeepstateAddresses.ROUTER);
         IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
 
-        _pre(DeepstateAddresses.DEEP.codehash == DeepstateAddresses.DEEP_CODEHASH, 1);
-        _pre(DeepstateAddresses.SABLIER_LOCKUP.codehash == DeepstateAddresses.SABLIER_LOCKUP_CODEHASH, 2);
-        _pre(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 3);
-        _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 4);
-        _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 5);
-        _pre(DeepstateAddresses.DGP001_BOOTSTRAP.codehash == DeepstateAddresses.DGP001_BOOTSTRAP_CODEHASH, 71);
-        _validateExternalDependencies();
+        _validateCodeAndExternalDependencies();
 
         _pre(governor.state(_DGP001_PROPOSAL_ID) == 7, 6);
         _pre(governor.proposalProposer(_DGP001_PROPOSAL_ID) == PROPOSER, 7);
@@ -192,11 +216,7 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(deep.totalSupply() <= minter.maxSupply() - combinedIssuance, 44);
         _pre(deep.allowance(DeepstateAddresses.MINTER_CONTROLLER, DeepstateAddresses.SABLIER_LOCKUP) == 0, 46);
         _pre(VOLUNTEER_A_AMOUNT + VOLUNTEER_B_AMOUNT + VOLUNTEER_C_AMOUNT == TOTAL_PRIMARY_MINT, 47);
-        uint256 calculatedVesting = VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS()
-            / minter.PRIMARY_ALLOCATION_BPS() + VOLUNTEER_B_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS()
-            / minter.PRIMARY_ALLOCATION_BPS() + VOLUNTEER_C_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS()
-            / minter.PRIMARY_ALLOCATION_BPS();
-        _pre(calculatedVesting == TOTAL_VESTING_AMOUNT, 48);
+        _pre(_calculatedVesting(minter) == TOTAL_VESTING_AMOUNT, 48);
         _pre(
             VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS() / minter.PRIMARY_ALLOCATION_BPS()
                 == VESTING_PER_MINT,
@@ -206,12 +226,22 @@ contract DeployDGP002 is DeepstateProposalScript {
         _pre(address(bootstrap.deepstateToken()) == DeepstateAddresses.DEEP, 76);
         _pre(bootstrap.endowmentAmount() != 0, 80);
         _pre(deep.allowance(DeepstateAddresses.GOVERNOR, DeepstateAddresses.SABLIER_LOCKUP) == 0, 82);
+    }
 
-        if (requireFullGovernanceWindow) {
-            uint256 governanceWindow =
-                governor.votingDelay() + governor.votingPeriod() + governor.lateQuorumVoteExtension() + 2;
-            _pre(block.timestamp + governanceWindow < administrationEndsAt, 50);
-        }
+    function _validateCodeAndExternalDependencies() private view {
+        _pre(DeepstateAddresses.DEEP.codehash == DeepstateAddresses.DEEP_CODEHASH, 1);
+        _pre(DeepstateAddresses.SABLIER_LOCKUP.codehash == DeepstateAddresses.SABLIER_LOCKUP_CODEHASH, 2);
+        _pre(DeepstateAddresses.MINTER_CONTROLLER.codehash == DeepstateAddresses.MINTER_CONTROLLER_CODEHASH, 3);
+        _pre(DeepstateAddresses.V1_CONTROLLER.codehash == DeepstateAddresses.V1_CONTROLLER_CODEHASH, 4);
+        _pre(DeepstateAddresses.REWARDER_FACTORY.codehash == DeepstateAddresses.REWARDER_FACTORY_CODEHASH, 5);
+        _pre(DeepstateAddresses.DGP001_BOOTSTRAP.codehash == DeepstateAddresses.DGP001_BOOTSTRAP_CODEHASH, 71);
+        _validateExternalDependencies();
+    }
+
+    function _calculatedVesting(DeepstateMinterController minter) private view returns (uint256) {
+        return VOLUNTEER_A_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS() / minter.PRIMARY_ALLOCATION_BPS()
+            + VOLUNTEER_B_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS() / minter.PRIMARY_ALLOCATION_BPS()
+            + VOLUNTEER_C_AMOUNT * minter.RECIPIENT_ALLOCATION_BPS() / minter.PRIMARY_ALLOCATION_BPS();
     }
 
     function _afterExecution() internal view override {

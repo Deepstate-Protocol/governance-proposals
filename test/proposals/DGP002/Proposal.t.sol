@@ -19,7 +19,7 @@ contract DGP002Test is Test {
     uint256 internal constant FORK_BLOCK = 52005951;
     bytes32 internal constant FORK_BLOCK_HASH = 0x171944f34f37a0ec4bdc941a27968441c513039f841a5acdc5b404208cec3c90;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x94722711019d3c5904f9d5d4c90cfc7d9d056d3304f0f1ceb9422145fb8d0b83;
+        0x4b78c9b8ab018c6146216e2eb9f5df589a3d4b3a02865fdc70eaf9717d7fdfe4;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _COMBINED_ISSUANCE = 14_285_714_285714285714285713;
@@ -117,26 +117,59 @@ contract DGP002Test is Test {
     }
 
     function testFullGovernorLifecycle() public {
-        _setUpActivatedFork();
-        proposal.validateSubmissionPreconditions();
+        _setUpBaseFork();
         IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
+        (
+            address[] memory dgp001Targets,
+            uint256[] memory dgp001Values,
+            bytes[] memory dgp001Calldatas,
+            string memory dgp001Description
+        ) = dgp001.proposal();
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
             proposal.proposal();
 
+        dgp001.validateSubmissionPreconditions();
+        vm.prank(dgp001.proposer());
+        uint256 dgp001Id = governor.propose(dgp001Targets, dgp001Values, dgp001Calldatas, dgp001Description);
+        assertEq(dgp001Id, dgp001.expectedProposalId());
+        assertEq(governor.state(dgp001Id), 0);
+
+        // DGP-002 is intentionally registered while DGP-001 is still Pending so both votes can run in parallel.
+        proposal.validateSubmissionPreconditions();
         vm.prank(proposal.proposer());
         uint256 proposalId = governor.propose(targets, values, calldatas, description);
         assertEq(proposalId, proposal.expectedProposalId());
         assertEq(governor.proposalProposer(proposalId), proposal.proposer());
         assertFalse(governor.proposalNeedsQueuing(proposalId));
+        assertEq(governor.state(proposalId), 0);
 
+        uint256 dgp001Snapshot = governor.proposalSnapshot(dgp001Id);
         uint256 snapshot = governor.proposalSnapshot(proposalId);
+        if (dgp001Snapshot > snapshot) snapshot = dgp001Snapshot;
         vm.warp(snapshot + 1);
         assertGe(governor.getVotes(QUORUM_VOTER, snapshot), governor.quorum(snapshot));
         vm.prank(QUORUM_VOTER);
+        governor.castVote(dgp001Id, 1);
+        vm.prank(QUORUM_VOTER);
         governor.castVote(proposalId, 1);
 
-        vm.warp(governor.proposalDeadline(proposalId) + 1);
+        uint256 dgp001Deadline = governor.proposalDeadline(dgp001Id);
+        uint256 deadline = governor.proposalDeadline(proposalId);
+        if (dgp001Deadline > deadline) deadline = dgp001Deadline;
+        vm.warp(deadline + 1);
+        assertEq(governor.state(dgp001Id), 4);
         assertEq(governor.state(proposalId), 4);
+
+        vm.expectRevert(abi.encodeWithSelector(DeployDGP002.PreconditionFailed.selector, 6));
+        proposal.validateExecutionPreconditions();
+
+        _clearLegacyMarket();
+        dgp001.validateActivationPreconditions();
+        governor.execute(dgp001Targets, dgp001Values, dgp001Calldatas, keccak256(bytes(dgp001Description)));
+        assertEq(governor.state(dgp001Id), 7);
+        assertEq(dgp001.verifyExecution(), dgp001Id);
+        vm.clearMockedCalls();
+
         proposal.validateExecutionPreconditions();
         Snapshot memory beforeState = _snapshot();
         uint256 executedAt = block.timestamp;
@@ -205,14 +238,17 @@ contract DGP002Test is Test {
     }
 
     function _setUpActivatedFork() private {
+        _setUpBaseFork();
+        _executeDGP001ThroughGovernor();
+        vm.clearMockedCalls();
+    }
+
+    function _setUpBaseFork() private {
         vm.createSelectFork(vm.rpcUrl("robinhood"), FORK_BLOCK + 1);
         assertEq(blockhash(FORK_BLOCK), FORK_BLOCK_HASH);
         vm.rollFork(FORK_BLOCK);
         assertEq(block.number, FORK_BLOCK);
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
-
-        _executeDGP001ThroughGovernor();
-        vm.clearMockedCalls();
     }
 
     function _executeDGP001ThroughGovernor() private {
