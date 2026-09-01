@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
 import {DeepstateAddresses} from "./config/DeepstateAddresses.sol";
-import {DeepstateProposal} from "../src/DeepstateProposal.sol";
+import {DeepstateProposal} from "./DeepstateProposal.sol";
 import {IDeepstateGovernor} from "../src/interfaces/IDeepstateGovernor.sol";
 
 /// @notice Safe submission entrypoint inherited by each proposal-specific deployment script.

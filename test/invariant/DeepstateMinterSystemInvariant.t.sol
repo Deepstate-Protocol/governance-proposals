@@ -12,8 +12,7 @@ import {MockSablierLockupLinearV4} from "../mocks/MockSablierLockupLinearV4.sol"
 /// @dev Stateful model for the complete DEEP administration term. The handler deliberately exposes both valid and
 /// invalid calls so the invariant campaign continuously tests authorization, phase boundaries and atomic rollback.
 contract DeepstateMinterSystemHandler is Test {
-    uint256 public constant LIVE_SUPPLY_CAP = 3_000_000_000e18;
-    uint256 public constant GROSS_ISSUANCE_CAP = 3_000_000_000e18;
+    uint256 public constant MAX_SUPPLY = 3_000_000_000e18;
 
     address public constant GOVERNANCE_A = address(0xA11CE);
     address public constant GOVERNANCE_B = address(0xB0B);
@@ -44,7 +43,6 @@ contract DeepstateMinterSystemHandler is Test {
     uint256 public totalBurned;
     uint256 public successfulMints;
     uint256 public failedSablierMints;
-    uint256 public externalMinterRevocations;
     uint40 public lastSuccessfulMintAt;
     bool public lastMintSucceeded;
 
@@ -54,9 +52,8 @@ contract DeepstateMinterSystemHandler is Test {
     constructor() {
         deep = new DeepstateToken(GOVERNANCE_A, "Deepstate", "DEEP");
         sablier = new MockSablierLockupLinearV4();
-        controller = new DeepstateMinterController(
-            GOVERNANCE_A, address(deep), address(sablier), VESTING_RECIPIENT, LIVE_SUPPLY_CAP, GROSS_ISSUANCE_CAP
-        );
+        controller =
+            new DeepstateMinterController(GOVERNANCE_A, address(deep), address(sablier), VESTING_RECIPIENT, MAX_SUPPLY);
 
         // Model token-level minters that governance must revoke before making the controller the sole mint path.
         vm.startPrank(GOVERNANCE_A);
@@ -72,7 +69,7 @@ contract DeepstateMinterSystemHandler is Test {
         address tokenMinter = _minter(minterSeed);
         address to = _mintRecipient(recipientSeed);
         uint256 supplyBefore = deep.totalSupply();
-        uint256 maximum = phase == 0 ? LIVE_SUPPLY_CAP - supplyBefore : LIVE_SUPPLY_CAP * 2;
+        uint256 maximum = phase == 0 ? MAX_SUPPLY - supplyBefore : MAX_SUPPLY * 2;
         uint256 amount = bound(rawAmount, 0, maximum);
         bool shouldSucceed = phase == 0;
 
@@ -88,8 +85,9 @@ contract DeepstateMinterSystemHandler is Test {
         }
     }
 
-    /// @dev Represents the atomic governance ordering: make the controller sole token admin, revoke every known bypass
-    /// minter, then start the two-year clock last. Activation records current supply and creates no issuance or stream.
+    /// @dev Represents the atomic governance ordering: revoke every known bypass minter, make the controller sole token
+    /// admin, then start the two-year clock last. The handler records the current supply for its accounting model;
+    /// activation itself creates no issuance or stream.
     function activate() external {
         if (phase != 0) return;
 
@@ -104,7 +102,6 @@ contract DeepstateMinterSystemHandler is Test {
         activationSupplyBaseline = supplyBefore;
 
         assertEq(controller.tokenAdministrationEndsAt(), expectedEndsAt, "incorrect administration deadline");
-        assertEq(controller.grossIssued(), supplyBefore, "activation baseline mismatch");
         assertEq(deep.totalSupply(), supplyBefore, "activation changed live supply");
         assertEq(sablier.nextStreamId(), streamBefore, "activation created a stream");
     }
@@ -112,6 +109,15 @@ contract DeepstateMinterSystemHandler is Test {
     function executeAtomicActivation() external {
         require(msg.sender == address(this), "only self");
         bytes32 tokenAdminRole = deep.DEFAULT_ADMIN_ROLE();
+        bytes32 tokenMinterRole = deep.MINTER_ROLE();
+        for (uint256 i; i < 3; ++i) {
+            address externalMinter = _minter(i);
+            if (deep.hasRole(tokenMinterRole, externalMinter)) {
+                vm.prank(GOVERNANCE_A);
+                deep.revokeRole(tokenMinterRole, externalMinter);
+            }
+        }
+
         vm.prank(GOVERNANCE_A);
         deep.grantRole(tokenAdminRole, address(controller));
         vm.prank(GOVERNANCE_A);
@@ -122,15 +128,6 @@ contract DeepstateMinterSystemHandler is Test {
             deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)), "controller must administer revocations"
         );
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(controller)), "controller minter must be self-granted");
-
-        for (uint256 i; i < 3; ++i) {
-            address externalMinter = _minter(i);
-            if (deep.hasRole(deep.MINTER_ROLE(), externalMinter)) {
-                vm.prank(expectedOwner);
-                controller.revokeExternalTokenMinter(externalMinter);
-                ++externalMinterRevocations;
-            }
-        }
 
         vm.prank(expectedOwner);
         controller.activateTokenAdministration();
@@ -214,12 +211,13 @@ contract DeepstateMinterSystemHandler is Test {
     function mint(uint8 callerSeed, uint8 recipientSeed, uint256 rawAmount) external returns (bool success) {
         address caller = callerSeed % 4 == 3 ? expectedOwner : _minter(callerSeed);
         address to = _mintRecipient(recipientSeed);
-        uint256 amount = bound(rawAmount, 0, LIVE_SUPPLY_CAP * 2);
+        // Zero-vesting rejection belongs to the real Sablier integration suite; this permissive local mock models
+        // successful stream creation only for production-relevant mint sizes.
+        uint256 amount = bound(rawAmount, 3, MAX_SUPPLY * 2);
         uint256 vestingAmount = Math.mulDiv(amount, 30_00, 70_00);
         uint256 combined = amount + vestingAmount;
 
         uint256 supplyBefore = deep.totalSupply();
-        uint256 grossBefore = controller.grossIssued();
         uint256 streamBefore = sablier.nextStreamId();
         uint256 controllerBalanceBefore = deep.balanceOf(address(controller));
         uint256 recipientBalanceBefore = deep.balanceOf(to);
@@ -229,10 +227,8 @@ contract DeepstateMinterSystemHandler is Test {
         bool active = endsAt != 0 && endsAt != type(uint40).max && block.timestamp < endsAt;
         bool authorized = caller == expectedOwner || controller.hasAnyRole(caller, controller.MINTER_ROLE());
         bool validAmount = vestingAmount != 0 && vestingAmount <= type(uint128).max;
-        bool withinGrossCap = combined <= GROSS_ISSUANCE_CAP - grossBefore;
-        bool withinLiveCap = combined <= LIVE_SUPPLY_CAP - supplyBefore;
-        bool shouldSucceed =
-            active && authorized && validAmount && withinGrossCap && withinLiveCap && !sablier.revertCreate();
+        bool withinMaxSupply = combined <= MAX_SUPPLY - supplyBefore;
+        bool shouldSucceed = active && authorized && validAmount && withinMaxSupply && !sablier.revertCreate();
 
         bytes memory result;
         vm.prank(caller);
@@ -244,7 +240,6 @@ contract DeepstateMinterSystemHandler is Test {
             uint256 streamId = abi.decode(result, (uint256));
             assertEq(streamId, streamBefore, "unexpected stream id");
             assertEq(deep.totalSupply(), supplyBefore + combined, "mint supply delta mismatch");
-            assertEq(controller.grossIssued(), grossBefore + combined, "gross issuance delta mismatch");
             assertEq(deep.balanceOf(to), recipientBalanceBefore + amount, "primary allocation mismatch");
             assertEq(
                 deep.balanceOf(address(sablier)), sablierBalanceBefore + vestingAmount, "vesting allocation mismatch"
@@ -259,7 +254,6 @@ contract DeepstateMinterSystemHandler is Test {
             primaryAmountForStream[streamId] = amount;
         } else {
             assertEq(deep.totalSupply(), supplyBefore, "failed mint changed supply");
-            assertEq(controller.grossIssued(), grossBefore, "failed mint changed gross issuance");
             assertEq(sablier.nextStreamId(), streamBefore, "failed mint consumed a stream id");
             assertEq(deep.balanceOf(to), recipientBalanceBefore, "failed mint changed primary balance");
             assertEq(deep.balanceOf(address(sablier)), sablierBalanceBefore, "failed mint changed Sablier balance");
@@ -267,7 +261,7 @@ contract DeepstateMinterSystemHandler is Test {
                 deep.balanceOf(address(controller)), controllerBalanceBefore, "failed mint changed controller balance"
             );
             assertEq(deep.allowance(address(controller), address(sablier)), 0, "failed mint left an allowance");
-            if (active && authorized && validAmount && withinGrossCap && withinLiveCap && sablier.revertCreate()) {
+            if (active && authorized && validAmount && withinMaxSupply && sablier.revertCreate()) {
                 ++failedSablierMints;
             }
         }
@@ -276,13 +270,9 @@ contract DeepstateMinterSystemHandler is Test {
     function burn(uint8 accountSeed, uint256 rawAmount) external {
         address account = _mintRecipient(accountSeed);
         uint256 amount = bound(rawAmount, 0, deep.balanceOf(account));
-        uint256 grossBefore = controller.grossIssued();
-
         vm.prank(account);
         deep.burn(amount);
         totalBurned += amount;
-
-        assertEq(controller.grossIssued(), grossBefore, "burn reopened gross issuance accounting");
     }
 
     function advanceTime(uint64 rawElapsed) external {
@@ -376,7 +366,6 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
         if (phase == 0) {
             assertEq(endsAt, 0);
-            assertEq(controller.grossIssued(), 0);
             assertEq(deep.defaultAdminCount(), 1);
             assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_A()));
             assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)));
@@ -401,7 +390,6 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
     function invariant_ControllerIsTheOnlyTrackedTokenMinterDuringTheTerm() public view {
         uint8 phase = handler.phase();
         assertEq(deep.hasRole(deep.MINTER_ROLE(), address(controller)), phase == 1);
-        assertEq(handler.externalMinterRevocations(), phase == 0 ? 0 : 3);
 
         for (uint256 i; i < 3; ++i) {
             address minter = handler.minter(i);
@@ -421,21 +409,18 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         }
     }
 
-    function invariant_ActivationBaselineAndMintAccountingRespectBothPermanentCaps() public view {
-        uint256 gross = controller.grossIssued();
+    function invariant_MintAccountingRespectsTheLiveMaxSupply() public view {
         uint8 phase = handler.phase();
         if (phase == 0) {
-            assertEq(gross, 0);
             assertEq(handler.activationSupplyBaseline(), 0);
             assertEq(handler.primaryIssued(), 0);
             assertEq(handler.vestingIssued(), 0);
         } else {
-            assertEq(gross, handler.activationSupplyBaseline() + handler.primaryIssued() + handler.vestingIssued());
             assertLe(handler.activationSupplyBaseline(), handler.externalIssued());
         }
 
-        assertLe(gross, controller.grossIssuanceCap());
-        assertLe(deep.totalSupply(), controller.mintCap());
+        assertEq(controller.maxSupply(), handler.MAX_SUPPLY());
+        assertLe(deep.totalSupply(), controller.maxSupply());
         assertEq(
             deep.totalSupply() + handler.totalBurned(),
             handler.externalIssued() + handler.primaryIssued() + handler.vestingIssued()
@@ -487,7 +472,6 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         }
         if (handler.phase() == 0) {
             assertEq(handler.successfulMints(), 0);
-            assertEq(controller.grossIssued(), 0);
             assertEq(sablier.nextStreamId(), 1);
         }
     }
@@ -501,7 +485,7 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         assertEq(controller.tokenAdministrationEndsAt(), type(uint40).max);
     }
 
-    function test_StatefulHarnessActivationRecordsCurrentSupplyWithoutMintOrStream() public {
+    function test_StatefulHarnessActivationPreservesCurrentSupplyWithoutMintOrStream() public {
         handler.externalTokenMint(0, 0, 100e18);
         handler.burn(0, 40e18);
         uint256 streamBefore = sablier.nextStreamId();
@@ -510,7 +494,6 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
 
         assertEq(handler.phase(), 1);
         assertEq(handler.activationSupplyBaseline(), 60e18);
-        assertEq(controller.grossIssued(), 60e18);
         assertEq(deep.totalSupply(), 60e18);
         assertEq(sablier.nextStreamId(), streamBefore);
         assertTrue(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
@@ -530,7 +513,6 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         controller.activateTokenAdministration();
 
         assertEq(controller.tokenAdministrationEndsAt(), 0);
-        assertEq(controller.grossIssued(), 0);
         assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
 
         vm.prank(governanceA);
@@ -543,27 +525,9 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         controller.activateTokenAdministration();
 
         assertEq(controller.tokenAdministrationEndsAt(), 0);
-        assertEq(controller.grossIssued(), 0);
         assertEq(deep.defaultAdminCount(), 1);
         assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)));
         assertTrue(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
-    }
-
-    function test_StatefulHarnessPreActivationRecoveryReturnsSoleAdministration() public {
-        vm.startPrank(handler.GOVERNANCE_A());
-        deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(controller));
-        deep.renounceRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_A());
-        vm.stopPrank();
-
-        vm.prank(handler.GOVERNANCE_A());
-        controller.returnPreActivationTokenAdministration();
-
-        assertEq(controller.tokenAdministrationEndsAt(), 0);
-        assertEq(controller.grossIssued(), 0);
-        assertEq(deep.defaultAdminCount(), 1);
-        assertTrue(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), handler.GOVERNANCE_A()));
-        assertFalse(deep.hasRole(deep.DEFAULT_ADMIN_ROLE(), address(controller)));
-        assertFalse(deep.hasRole(deep.MINTER_ROLE(), address(controller)));
     }
 
     function test_StatefulHarnessExercisesAtomicSablierFailureAndRecovery() public {
@@ -575,28 +539,27 @@ contract DeepstateMinterSystemInvariantTest is StdInvariant, Test {
         assertFalse(failed);
         assertEq(handler.failedSablierMints(), 1);
         assertEq(deep.totalSupply(), 0);
-        assertEq(controller.grossIssued(), 0);
         assertEq(sablier.nextStreamId(), 1);
 
         handler.setSablierFailure(false);
         bool succeeded = handler.mint(0, 0, 70e18);
         assertTrue(succeeded);
         assertEq(deep.totalSupply(), 100e18);
-        assertEq(controller.grossIssued(), 100e18);
         assertEq(sablier.nextStreamId(), 2);
     }
 
-    function test_StatefulHarnessGrossCapCannotBeReopenedByBurning() public {
+    function test_StatefulHarnessMaxSupplyIsExactAndBurningReopensHeadroom() public {
         handler.activate();
         handler.setControllerMinter(0, true);
 
-        uint256 primaryToFillGross = Math.mulDiv(handler.GROSS_ISSUANCE_CAP(), 70_00, 100_00);
-        assertTrue(handler.mint(0, 0, primaryToFillGross));
-        assertEq(controller.grossIssued(), handler.GROSS_ISSUANCE_CAP());
-        handler.burn(0, primaryToFillGross);
-        assertEq(deep.totalSupply(), handler.GROSS_ISSUANCE_CAP() - primaryToFillGross);
+        uint256 primaryToFillMax = Math.mulDiv(handler.MAX_SUPPLY(), 70_00, 100_00);
+        assertTrue(handler.mint(0, 0, primaryToFillMax));
+        assertEq(deep.totalSupply(), handler.MAX_SUPPLY());
         assertFalse(handler.mint(0, 0, 3));
-        assertEq(controller.grossIssued(), handler.GROSS_ISSUANCE_CAP());
+        handler.burn(0, 4);
+        assertEq(deep.totalSupply(), handler.MAX_SUPPLY() - 4);
+        assertTrue(handler.mint(0, 0, 3));
+        assertEq(deep.totalSupply(), handler.MAX_SUPPLY());
     }
 
     function test_StatefulHarnessEnforcesExactDeadlineAndReturnsAdministrationToCurrentOwner() public {

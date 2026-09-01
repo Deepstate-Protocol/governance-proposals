@@ -40,7 +40,6 @@ interface IRouterDeploymentIdentity {
 /// @dev `run()` is read-only and only prints the plan. Deployment requires deliberately selecting `deploy()`, setting
 /// DEEPSTATE_CONFIRM_CREATE2_DEPLOYMENT=true, and passing Foundry's separate `--broadcast` flag.
 contract DeployRewarderV2System is Script {
-    uint256 private constant MINIMUM_COMBINED_ISSUANCE = 4;
     uint256 public constant MAXIMUM_LEGACY_ENDOWMENT = 300_000_000e18;
     uint256 public constant ACTIVATION_MARKET_PRIMARY_FUNDING = 100_000_000e18;
     uint256 public constant ACTIVATION_MARKET_VESTING = ACTIVATION_MARKET_PRIMARY_FUNDING * 30 / 70;
@@ -102,7 +101,7 @@ contract DeployRewarderV2System is Script {
         vm.stopBroadcast();
 
         _verifyMinterController(plan.minterController);
-        _verifyBootstrap(plan.dgp001Bootstrap, plan.minterController);
+        _verifyBootstrap(plan.dgp001Bootstrap);
         _verifyV1Controller(plan.v1Controller);
         _verifyFactory(plan.rewarderFactory, plan.minterController, plan.v1Controller);
         _logPlan(plan);
@@ -146,8 +145,7 @@ contract DeployRewarderV2System is Script {
                 DeepstateAddresses.DEEP,
                 DeepstateAddresses.SABLIER_LOCKUP,
                 DeepstateAddresses.DEEPSTATE_INC_SAFE,
-                DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP,
-                DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
+                DeepstateAddresses.MINTER_MAX_SUPPLY
             )
         );
         plan.minterInitCodeHash = keccak256(plan.minterInitCode);
@@ -155,7 +153,7 @@ contract DeployRewarderV2System is Script {
 
         plan.bootstrapInitCode = abi.encodePacked(
             type(DGP001Bootstrap).creationCode,
-            abi.encode(DeepstateAddresses.GOVERNOR, plan.minterController, DeepstateAddresses.REWARDER)
+            abi.encode(DeepstateAddresses.GOVERNOR, DeepstateAddresses.DEEP, DeepstateAddresses.REWARDER)
         );
         plan.bootstrapInitCodeHash = keccak256(plan.bootstrapInitCode);
         plan.dgp001Bootstrap = _create2Address(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCodeHash);
@@ -168,13 +166,7 @@ contract DeployRewarderV2System is Script {
 
         plan.factoryInitCode = abi.encodePacked(
             type(DeepstateRewarderFactory).creationCode,
-            abi.encode(
-                DeepstateAddresses.GOVERNOR,
-                plan.v1Controller,
-                plan.minterController,
-                DeepstateAddresses.USDG,
-                DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET
-            )
+            abi.encode(DeepstateAddresses.GOVERNOR, plan.v1Controller, plan.minterController)
         );
         plan.factoryInitCodeHash = keccak256(plan.factoryInitCode);
         plan.rewarderFactory = _create2Address(FACTORY_SALT, plan.factoryInitCodeHash);
@@ -238,12 +230,7 @@ contract DeployRewarderV2System is Script {
         ) {
             revert InvalidDeployedConfiguration(DeepstateAddresses.ROUTER);
         }
-        if (
-            !_hasActivationMintHeadroom(DeepstateAddresses.DEEP, DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP)
-                || !_hasActivationGrossIssuanceHeadroom(
-                    DeepstateToken(DeepstateAddresses.DEEP).totalSupply(), DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
-                )
-        ) {
+        if (!_hasActivationSupplyHeadroom(DeepstateAddresses.DEEP, DeepstateAddresses.MINTER_MAX_SUPPLY)) {
             revert InvalidDeployedConfiguration(DeepstateAddresses.DEEP);
         }
     }
@@ -261,7 +248,7 @@ contract DeployRewarderV2System is Script {
         }
         if (plan.minterController.code.length != 0) _verifyMinterController(plan.minterController);
         if (plan.dgp001Bootstrap.code.length != 0) {
-            _verifyBootstrap(plan.dgp001Bootstrap, plan.minterController);
+            _verifyBootstrap(plan.dgp001Bootstrap);
         }
         if (plan.v1Controller.code.length != 0) _verifyV1Controller(plan.v1Controller);
         if (plan.rewarderFactory.code.length != 0) {
@@ -276,34 +263,22 @@ contract DeployRewarderV2System is Script {
                 || address(controller.deepstateToken()) != DeepstateAddresses.DEEP
                 || address(controller.sablierLockup()) != DeepstateAddresses.SABLIER_LOCKUP
                 || controller.recipient() != DeepstateAddresses.DEEPSTATE_INC_SAFE
-                || controller.mintCap() != DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP
-                || controller.grossIssuanceCap() != DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP
-                || controller.MINIMUM_COMBINED_ISSUANCE() != MINIMUM_COMBINED_ISSUANCE
-                || !_hasActivationMintHeadroom(address(controller.deepstateToken()), controller.mintCap())
-                || !_hasActivationGrossIssuanceHeadroom(
-                    controller.deepstateToken().totalSupply(), controller.grossIssuanceCap()
-                ) || controller.grossIssued() != 0 || controller.tokenAdministrationEndsAt() != 0
+                || controller.maxSupply() != DeepstateAddresses.MINTER_MAX_SUPPLY
+                || !_hasActivationSupplyHeadroom(address(controller.deepstateToken()), controller.maxSupply())
+                || controller.tokenAdministrationEndsAt() != 0
         ) {
             revert InvalidDeployedConfiguration(deployed);
         }
     }
 
-    function _verifyBootstrap(address deployed, address minterController) internal view {
+    function _verifyBootstrap(address deployed) internal view {
         DGP001Bootstrap bootstrap = DGP001Bootstrap(deployed);
         DeepstateToken token = DeepstateToken(DeepstateAddresses.DEEP);
         if (
             deployed.codehash != DGP001_BOOTSTRAP_RUNTIME_CODE_HASH
                 || bootstrap.governor() != DeepstateAddresses.GOVERNOR
-                || address(bootstrap.minterController()) != minterController
-                || address(bootstrap.deepstateToken()) != DeepstateAddresses.DEEP
-                || address(bootstrap.sablierLockup()) != DeepstateAddresses.SABLIER_LOCKUP
-                || address(bootstrap.legacyRewarder()) != DeepstateAddresses.REWARDER
-                || bootstrap.recipient() != DeepstateAddresses.DEEPSTATE_INC_SAFE || bootstrap.executed()
-                || bootstrap.snapshotBlock() != 0 || bootstrap.snapshotAt() != 0
-                || bootstrap.snapshotToken0() != address(0) || bootstrap.snapshotToken1() != address(0)
-                || bootstrap.token0Accrued() != 0 || bootstrap.token1Accrued() != 0 || bootstrap.totalAccrued() != 0
-                || bootstrap.endowmentAmount() != 0 || bootstrap.preexistingBalanceBurned() != 0
-                || bootstrap.postEndowmentSupply() != 0 || bootstrap.streamId() != 0
+                || address(bootstrap.deepstateToken()) != DeepstateAddresses.DEEP || bootstrap.endowmentAmount() == 0
+                || bootstrap.endowmentAmount() > MAXIMUM_LEGACY_ENDOWMENT
                 || token.hasRole(token.MINTER_ROLE(), deployed)
         ) {
             revert InvalidDeployedConfiguration(deployed);
@@ -328,14 +303,11 @@ contract DeployRewarderV2System is Script {
                 || address(factory.minterController()) != minterController
                 || address(factory.deepstate()) != DeepstateAddresses.ROUTER
                 || address(factory.rewardToken()) != DeepstateAddresses.DEEP
-                || factory.usdG() != DeepstateAddresses.USDG
-                || factory.fundingBudget() != DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET
                 || factory.MARKET_FUNDING() != ACTIVATION_MARKET_PRIMARY_FUNDING
                 || factory.SIDE_EMISSION_CAP() != 50_000_000e18 || factory.EMISSION_DURATION() != 365 days
-                || factory.DEPLOYMENT_COOLDOWN() != 3 days || factory.USDG_START_QUANTITY() != 1e6
-                || factory.USDG_MAX_QUANTITY() != 1_000_000e6 || factory.MAX_QUANTITY_GROWTH() != 1_000_000
+                || factory.DEPLOYMENT_COOLDOWN() != 3 days || factory.MAX_QUANTITY_GROWTH() != 1_000_000
                 || factory.operator() != address(0) || factory.nextDeploymentAt() != 0
-                || factory.fundingCommitted() != 0 || DeepstateMinterController(minterController).rolesOf(deployed) != 0
+                || DeepstateMinterController(minterController).rolesOf(deployed) != 0
                 || DeepstateV1Controller(v1Controller).rolesOf(deployed) != 0
         ) {
             revert InvalidDeployedConfiguration(deployed);
@@ -368,6 +340,10 @@ contract DeployRewarderV2System is Script {
         ) {
             revert InvalidDeployedConfiguration(DeepstateAddresses.REWARDER);
         }
+        uint256 endowmentAmount = (uint256(token0Accrued) + uint256(token1Accrued)) * 30 / 100;
+        if (endowmentAmount == 0 || endowmentAmount > MAXIMUM_LEGACY_ENDOWMENT) {
+            revert InvalidDeployedConfiguration(DeepstateAddresses.REWARDER);
+        }
     }
 
     function _requireCodeHash(address target, bytes32 expected) private view {
@@ -375,15 +351,9 @@ contract DeployRewarderV2System is Script {
         if (actual != expected) revert CodeHashMismatch(target, expected, actual);
     }
 
-    function _hasActivationMintHeadroom(address token, uint256 cap) private view returns (bool) {
-        return cap >= MINIMUM_ACTIVATION_ISSUANCE_HEADROOM
-            && DeepstateToken(token).totalSupply() <= cap - MINIMUM_ACTIVATION_ISSUANCE_HEADROOM;
-    }
-
-    function _hasActivationGrossIssuanceHeadroom(uint256 activationBaseline, uint256 cap) private pure returns (bool) {
-        return
-            cap >= MINIMUM_ACTIVATION_ISSUANCE_HEADROOM
-                && activationBaseline <= cap - MINIMUM_ACTIVATION_ISSUANCE_HEADROOM;
+    function _hasActivationSupplyHeadroom(address token, uint256 maxSupply) private view returns (bool) {
+        return maxSupply >= MINIMUM_ACTIVATION_ISSUANCE_HEADROOM
+            && DeepstateToken(token).totalSupply() <= maxSupply - MINIMUM_ACTIVATION_ISSUANCE_HEADROOM;
     }
 
     function _logPlan(DeploymentPlan memory plan) private view {
@@ -409,9 +379,7 @@ contract DeployRewarderV2System is Script {
         console2.logBytes32(plan.factoryInitCodeHash);
         console2.log("Rewarder Factory runtime code hash (zero until deployed)");
         console2.logBytes32(plan.rewarderFactory.codehash);
-        console2.log("Live DEEP supply cap", DeepstateAddresses.MINTER_LIVE_SUPPLY_CAP);
-        console2.log("Controller gross issuance cap", DeepstateAddresses.MINTER_GROSS_ISSUANCE_CAP);
+        console2.log("Maximum DEEP supply", DeepstateAddresses.MINTER_MAX_SUPPLY);
         console2.log("Minimum activation issuance headroom", MINIMUM_ACTIVATION_ISSUANCE_HEADROOM);
-        console2.log("Factory lifetime funding budget", DeepstateAddresses.FACTORY_LIFETIME_FUNDING_BUDGET);
     }
 }

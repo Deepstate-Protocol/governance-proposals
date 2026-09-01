@@ -5,18 +5,27 @@ The release deploys `DeepstateMinterController`, `DGP001Bootstrap`, `DeepstateV1
 the Router, grant a DEEP role, grant a controller role, set the Factory operator, mint DEEP, or install a pool hook.
 Those state changes belong in exact, fork-tested governance payloads.
 
+`DGP001Bootstrap` fixes the endowment during construction, not during governance execution. Its constructor reads the
+legacy Rewarder's token0 and token1 `totalAccrued` counters and stores
+`floor((token0 accrued + token1 accrued) * 30 / 100)` as an immutable `uint128`; later accrual, including accrual during
+the voting period, is excluded. The deployment receipt and manifest therefore define the economic snapshot and must
+record the observed counters and resulting amount.
+
 ## Pinned release policy
 
 These are governance-selected conservative limits, not facts discovered from the live protocol:
 
-- the Minter Controller rejects a mint that would raise live DEEP supply above 3 billion DEEP;
-- on activation it sets `grossIssued` to the full then-current supply, which includes the one-time Bootstrap endowment,
-  and rejects later primary-plus-vesting issuance that would raise that counter above 3 billion DEEP; burns after
-  activation do not restore gross allowance, while historical burns before the supply snapshot cannot be reconstructed;
-  and
-- the Factory has a 1 billion DEEP lifetime **primary** funding budget. Each Rewarder is fully funded with 100 million
-  primary DEEP for a 100-million maximum schedule over exactly 365 days, permitting exactly ten markets including the
-  migrated NVDA/USDG market. Retiring a market does not restore budget.
+- the Minter Controller rejects a primary-plus-vesting mint that would raise live DEEP supply above its immutable
+  3-billion-DEEP `maxSupply`; burns reduce live supply and therefore restore headroom under that maximum; and
+- each Factory launch fully funds one Rewarder with 100 million primary DEEP for a 100-million maximum schedule over
+  exactly 365 days. The Factory has no separate funding budget or committed-funding counter: each launch must fit the
+  Minter Controller's 3-billion maximum supply, including its paired Inc stream. A launch may
+  replace the pair's current Router hook without modifying the old hook contract or its balance, and the same pair can
+  be deployed again after the global cooldown; and
+- every Rewarder side starts at one whole unit. Each `deployMarket` accepts a caller-canonical token pair and a
+  whole-unit maximum for each side, reads `decimals()` for each nonzero token, and treats `address(0)` as an 18-decimal
+  native asset. All raw quantities must fit `uint160`, and each side's effective growth range is 1,000x through
+  1,000,000x.
 
 Changing any policy constant, constructor, compiler setting, source file, or linked library changes the CREATE2 init
 code, address, or both. Regenerate and review the plan after every such change.
@@ -99,8 +108,8 @@ forge script script/DeployRewarderV2System.s.sol:DeployRewarderV2System \
 Review the simulation, broadcaster, balances, gas, nonce, addresses, and constructor values. Only then repeat the same
 command with `--broadcast`. The script calls Arachnid's canonical deterministic deployment proxy at
 `0x4e59b44847b379578588920cA78FbF26c0B4956C`; it deploys the Minter Controller, then the Bootstrap, then the V1
-Controller, then the Factory. The Bootstrap depends on the already-deployed Minter Controller, and the Factory depends
-on both reusable Controllers. The release is idempotent: an exact contract already present at a planned address is
+Controller, then the Factory. The Bootstrap depends directly on the pinned DEEP token and legacy Rewarder, while the
+Factory depends on both reusable Controllers. The release is idempotent: an exact contract already present at a planned address is
 validated and skipped, while incompatible configuration reverts.
 
 No private key, keystore password, or RPC credential belongs in the repository, shell history, manifest, or Foundry
@@ -124,52 +133,67 @@ Do not mark a manifest `deployed` while any transaction, block, runtime hash, or
 
 Deployment and activation are separate review gates. Immediately before DGP-001, the Governor must be DEEP's sole
 default admin and no address may have DEEP's token-level `MINTER_ROLE`. An unexpected token minter is a failed preflight,
-not an authority that the fixed DGP-001 payload silently tolerates.
+not an authority that the fixed DGP-001 payload silently tolerates. The pinned five-event live history proves that the
+deployer's only minter grant was revoked and that no other pre-existing minter grant remains active.
 
-The DGP-001 Governor execution makes exactly ten calls in this order:
+The DGP-001 Governor execution makes exactly fifteen calls in this order:
 
-1. DEEP grants its token-level `MINTER_ROLE` to `DGP001Bootstrap`.
-2. The Bootstrap calls `execute()`: it verifies the pristine Minter configuration and exact installed, idle V1 market,
-   snapshots both live `totalAccrued` counters, mints `floor(totalAccrued * 30 / 100)`, creates the complete one-year
-   stream, records the result, and renounces its temporary minter role.
-3. DEEP grants `DEFAULT_ADMIN_ROLE` to the Minter Controller.
-4. The Governor renounces DEEP's `DEFAULT_ADMIN_ROLE`, leaving the Minter Controller as sole token administrator.
-5. The Minter Controller calls `activateTokenAdministration()`: it verifies sole administration and that it does not
-   already hold DEEP's minter role, self-grants that role, records the full post-Bootstrap DEEP supply as `grossIssued`,
-   and starts the exact 730-day clock.
-6. The Minter Controller grants the Factory only its Controller-local `MINTER_ROLE`.
-7. The Router transfers ownership to the V1 Controller.
-8. The V1 Controller grants the Factory only its Controller-local `HOOK_MANAGER_ROLE`.
-9. The Factory calls owner-only `migrateMarket` with the exact live V1 Rewarder, reviewed NVDA ramp, and both sides
-   active.
-10. The Factory sets the Deepstate Inc Safe as its revocable operator.
+1. DEEP explicitly revokes `MINTER_ROLE` from the deployer, the sole historical external token-level minter. The
+   reviewed live state already has this role revoked, so this is an explicit defense-in-depth action.
+2. DEEP grants its token-level `MINTER_ROLE` to `DGP001Bootstrap`.
+3. The Bootstrap calls `mint()`, which only mints its fixed deployment-time amount directly to the Governor.
+4. DEEP explicitly revokes the Bootstrap's temporary token-level `MINTER_ROLE`; this immediate revocation plus the
+   Governor proposal's one-time execution supplies the operational one-use boundary.
+5. The Governor approves Sablier for exactly the fixed endowment amount.
+6. The Governor calls Sablier directly to create the noncancelable, nontransferable one-year stream for the Deepstate Inc
+   Safe, with the Governor as both funder and sender and no cliff or initial unlock.
+7. DEEP grants `DEFAULT_ADMIN_ROLE` to the Minter Controller.
+8. The Governor renounces DEEP's `DEFAULT_ADMIN_ROLE`, leaving the Minter Controller as sole token administrator.
+9. The Minter Controller calls `activateTokenAdministration()`: it verifies sole administration and that it does not
+   already hold DEEP's minter role, self-grants that role, and starts the exact 730-day clock.
+10. The Minter Controller grants the Factory only its Controller-local `MINTER_ROLE`.
+11. The Governor directly clears the legacy hook while it still owns the Router.
+12. The Router transfers ownership to the V1 Controller.
+13. The V1 Controller grants the Factory only its Controller-local `HOOK_MANAGER_ROLE`.
+14. The Factory calls its ordinary generic `deployMarket` path with the canonical `(USDG, NVDA)` pair,
+    `token0MaxUnits = 1_000_000`, `token1MaxUnits = 5_000`, and both sides active. It derives raw one-unit starts and
+    maxima from USDG's and NVDA's decimal metadata.
+15. The Factory sets the Deepstate Inc Safe as its revocable operator.
 
-The Bootstrap is the only contract with one-off legacy-endowment logic. The Minter Controller has no legacy Rewarder
-reference or endowment entrypoint; its reusable responsibilities are the 730-day administration term, 30/70 controlled
-mints, one-year Inc streams, and the two 3-billion caps. No ordinary controlled mint can occur before activation or at
-the deadline. If DEEP administration is transferred to the Controller outside the atomic proposal but activation
-cannot complete, the owner-only `returnPreActivationTokenAdministration()` path returns administration and removes any
-Controller minter role; it is permanently unavailable after successful activation.
+The Bootstrap's entire runtime responsibility is the one-line frozen-amount mint to the Governor. It has no Sablier,
+Minter Controller, Router, recipient, cap, dust, execution-latch, or runtime-snapshot logic; repeated calls are possible
+only while it retains DEEP's minter role. The Minter Controller has no legacy Rewarder reference or endowment entrypoint;
+its reusable responsibilities are the 730-day administration term, 30/70 controlled mints, one-year Inc streams, and
+the immutable 3-billion-DEEP maximum supply. No ordinary controlled mint can occur before activation or at the
+deadline. The admin grant, Governor renunciation, and Controller activation are deliberately consecutive actions
+inside one atomic Governor execution, so any failed activation rolls back the complete handoff.
 
-The migration is allowed only when the Router still reports the exact expected predecessor, both sides of the active
-book are empty, both legacy Rewarder cursors are zero, and the predecessor identifies the same Router, pool, tokens,
-and DEEP reward token. It clears V1, deploys and fully funds V2 with 100 million DEEP, creates the corresponding
-`floor(100 million * 30 / 70)` one-year stream, and installs the V2 hook inside one Factory call. Any failed condition,
-mint, Sablier interaction, deployment, or hook installation reverts the complete Governor execution.
+Immediately before execution, the release preflight must report the exact expected predecessor, both sides of the active
+book empty, both legacy Rewarder cursors zero, and the predecessor bound to the pinned Router, pool, tokens, and DEEP.
+These are offchain release gates: neither the Bootstrap nor the Governor payload validates them, so any drift between
+the read and the execution requires stopping and rerunning the gate. The later ordinary Factory deployment fully funds
+V2 with 100 million DEEP, creates the corresponding `floor(100 million * 30 / 70)` one-year stream, and installs the V2
+hook. A reverting direct call, mint, Sablier interaction, deployment, or hook installation still rolls back the complete
+Governor execution.
 
-The Factory must never own either Controller or receive DEEP's token-level minter/admin roles. The operator must never
-own the Factory or either Controller. Governance retains fee configuration, Controller ownership, Factory ownership,
-owner-only hook migration, operator revocation, and eventual return of DEEP administration. There is no market top-up
-function: 100 million DEEP is both the one-time funding and the complete maximum reward schedule.
+As an unenforced operational policy, the Factory should never own either Controller or receive DEEP's token-level
+minter/admin roles, and the operator should never own the Factory or either Controller. Contract ownership and
+delegated roles are independent. Governance retains fee configuration, Controller ownership, Factory ownership,
+direct hook configuration, operator revocation, and eventual return of DEEP administration. There is no market top-up
+function: 100 million DEEP is both the one-time funding and the complete maximum reward schedule. The operator is
+deliberately trusted to choose generic canonical pairs, replace or unlink whatever hook is current for a supplied pair,
+and invoke the separate balance-burn path; the Factory stores no active-Rewarder or deployment-history mapping and no
+expected-Rewarder guard.
 
-Every proposal script must encode and test the exact order of calls. DGP-001 combines the dynamic endowment, sole token
-administration, controller lock, delegated Factory permissions, Router custody, exact V1-to-V2 migration, and operator
+Every proposal script must encode and test the exact order of calls. DGP-001 combines the deployment-frozen endowment, sole token
+administration, controller lock, delegated Factory permissions, Router custody, exact V1-to-V2 replacement, and operator
 appointment in one atomic Governor execution. Proposal fork tests should assert every intermediate role count as well
 as final roles, because a final-state-only assertion can miss a temporarily over-privileged call order.
 
-The expected DGP-001 DEEP role-event sequence is likewise exact: temporary Bootstrap minter grant, Bootstrap
-self-renunciation, Minter Controller admin grant, Governor admin renunciation, and Minter Controller minter self-grant,
-all in the execution transaction. Post-execution, the Minter Controller is DEEP's sole admin and minter; the Governor,
+The expected DGP-001 DEEP role-event sequence is likewise exact: the already-revoked deployer action emits no event,
+followed by temporary Bootstrap minter grant, proposal-directed Bootstrap minter revocation, Minter Controller admin
+grant, Governor admin renunciation, and Minter Controller minter self-grant, all in the execution transaction.
+Post-execution, the Minter Controller is DEEP's sole admin and minter; the Governor,
 Bootstrap, Factory, operator, legacy Rewarder, and deployer hold neither DEEP role.
 
 The live V1 Rewarder cannot be retired, swept, or seeded into V2. Emptying both book sides before execution gives it its
@@ -182,17 +206,19 @@ already-recorded historical claims remain available. V2 begins a new 100-million
 Pin a post-activation block and hash, then verify at minimum:
 
 - all four deployed runtime code hashes and immutable constructor values;
-- Bootstrap snapshot block/time/tokens/accrual, exact endowment and stream, any unsolicited preexisting balance burned
-  during execution, `executed` state, role renunciation, and zero residual Sablier allowance; do not use its later
-  ERC20 balance as an authority or execution invariant because anyone can transfer dust to it;
-- Minter `tokenAdministrationEndsAt`, sole DEEP admin status, token-level minter status, full activation supply
-  baseline, live/gross caps, gross issued, exact later stream parameters, and zero residual allowance; an unsolicited
-  ERC20 transfer to the Controller does not alter its issuance accounting or streaming behavior;
+- Bootstrap Governor, DEEP token, constructor-frozen endowment amount, and final role revocation; the helper
+  has no execution record, stream ID, allowance, or dust-cleanup state;
+- the Governor-funded and Governor-sent endowment stream's exact amount, recipient, one-year duration, zero cliff and
+  initial unlock, noncancelable/nontransferable flags, and zero residual Governor-to-Sablier allowance;
+- Minter `tokenAdministrationEndsAt`, sole DEEP admin status, token-level minter status, immutable 3-billion-DEEP
+  `maxSupply`, exact later stream parameters, and zero residual allowance; an unsolicited ERC20 transfer to the
+  Controller does not alter its supply check or streaming behavior;
 - V1 Controller ownership of the Router with the original fee recipient and 10 bps fee unchanged;
-- Factory owner, operator, immutable USDG, 1 billion primary budget, exactly 100 million committed by the migrated
-  first market, its 50-million-per-side caps and 365-day duration, and exact
-  delegated roles on both Controllers;
-- the exact previous V1 address, idle migration preconditions from the execution block, new V2 hook and side flags,
+- Factory owner, operator, Controller dependencies, the replacement first market's exact 100-million primary mint,
+  its canonical USDG/NVDA tokens, one-to-1,000,000-whole-USDG and
+  one-to-5,000-whole-NVDA ramps, 50-million-per-side caps and 365-day duration, and exact delegated roles on both
+  Controllers; the Router hook is the source of the current Rewarder because the Factory stores no active registry;
+- the exact previous V1 address, idle replacement preconditions from the execution block, new V2 hook and side flags,
   unchanged Router fee, and the V1 residual balance and claimability limitation;
 - no unexpected DEEP admin or token-level minter; and
 - proposal IDs, description hashes, execution transaction hashes, and all proposal-specific balance/stream outcomes.

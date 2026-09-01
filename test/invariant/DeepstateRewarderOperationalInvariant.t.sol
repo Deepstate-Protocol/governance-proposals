@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
+import {Ownable} from "solady/auth/Ownable.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 
 import {DeepstateV1} from "deepstate-contracts/DeepstateV1.sol";
@@ -102,18 +103,13 @@ contract DeepstateRewarderOperationalHandler is Test {
     uint256 public maxSuccessfulExecuteGas;
     uint256 public successfulExecutions;
     uint256 public invalidAttempts;
+    uint256 public authorizedBurnCalls;
+    uint256 public unauthorizedBurnAttempts;
+    uint256 public totalBurned;
 
     bool public bindingViolation;
     bool public validExecutionFailure;
-    bool public retirementViolation;
-    bool public retiredActionViolation;
-    bool public retired;
-    uint96 public token0AccruedAtRetirement;
-    uint96 public token1AccruedAtRetirement;
-    uint32 public token0NonceAtRetirement;
-    uint32 public token1NonceAtRetirement;
-    uint64 public token0CursorAtRetirement;
-    uint64 public token1CursorAtRetirement;
+    bool public burnViolation;
 
     constructor() {
         orderBook = new OperationalOrderBook();
@@ -136,8 +132,7 @@ contract DeepstateRewarderOperationalHandler is Test {
         );
         rewardToken.mint(address(rewarder), uint256(SIDE_CAP) * 2);
 
-        // Establish a non-vacuous cold installation sample before retirement can be selected as the
-        // first randomized action in a run.
+        // Establish a non-vacuous cold installation sample.
         (bool success,, uint256 gasUsed) = orderBook.tryExecute(rewarder, configuredPoolId, BOOK_A, TOKEN0, 0, 1);
         require(success, "baseline execute failed");
         successfulExecutions = 1;
@@ -153,8 +148,6 @@ contract DeepstateRewarderOperationalHandler is Test {
         uint32 incomingSeed,
         uint32 elapsedSeed
     ) external {
-        if (retired) return;
-
         address token = sideSeed & 1 == 0 ? TOKEN0 : TOKEN1;
         bytes32 incomingBook = bookSeed & 1 == 0 ? BOOK_A : BOOK_B;
         uint32 incomingNonce = incomingSeed % 5 == 0 ? 0 : incomingSeed | 1;
@@ -195,98 +188,65 @@ contract DeepstateRewarderOperationalHandler is Test {
 
     function attemptUnauthorizedExecute(uint8 sideSeed, uint160 outgoingAmount, uint32 incomingNonce) external {
         address token = sideSeed & 1 == 0 ? TOKEN0 : TOKEN1;
-        bytes4 expected =
-            retired ? DeepstateRewarderV2.RewarderRetired.selector : DeepstateRewarder.NotDeepstate.selector;
-        _attemptInvalid(false, expected, configuredPoolId, BOOK_A, token, outgoingAmount, incomingNonce);
+        _attemptInvalid(
+            false,
+            DeepstateRewarder.NotDeepstate.selector,
+            configuredPoolId,
+            BOOK_A,
+            token,
+            outgoingAmount,
+            incomingNonce
+        );
     }
 
     function attemptWrongPool(uint8 sideSeed, uint160 outgoingAmount, uint32 incomingNonce) external {
         address token = sideSeed & 1 == 0 ? TOKEN0 : TOKEN1;
-        bytes4 expected =
-            retired ? DeepstateRewarderV2.RewarderRetired.selector : DeepstateRewarder.InvalidPool.selector;
-        _attemptInvalid(true, expected, INVALID_POOL, BOOK_A, token, outgoingAmount, incomingNonce);
+        _attemptInvalid(
+            true, DeepstateRewarder.InvalidPool.selector, INVALID_POOL, BOOK_A, token, outgoingAmount, incomingNonce
+        );
     }
 
     function attemptWrongToken(uint160 outgoingAmount, uint32 incomingNonce) external {
-        bytes4 expected =
-            retired ? DeepstateRewarderV2.RewarderRetired.selector : DeepstateRewarder.InvalidHookToken.selector;
-        _attemptInvalid(true, expected, configuredPoolId, BOOK_A, UNKNOWN_TOKEN, outgoingAmount, incomingNonce);
+        _attemptInvalid(
+            true,
+            DeepstateRewarder.InvalidHookToken.selector,
+            configuredPoolId,
+            BOOK_A,
+            UNKNOWN_TOKEN,
+            outgoingAmount,
+            incomingNonce
+        );
     }
 
-    function retireRewarder() external {
-        if (retired) return;
-
-        uint256 funding = rewardToken.balanceOf(address(rewarder));
+    function burnRewarderBalance() external {
+        uint256 balanceBefore = rewardToken.balanceOf(address(rewarder));
         uint256 supplyBefore = rewardToken.totalSupply();
-        token0AccruedAtRetirement = rewarder.totalAccrued(TOKEN0);
-        token1AccruedAtRetirement = rewarder.totalAccrued(TOKEN1);
-        (token0NonceAtRetirement, token0CursorAtRetirement) = rewarder.rewardees(TOKEN0);
-        (token1NonceAtRetirement, token1CursorAtRetirement) = rewarder.rewardees(TOKEN1);
 
-        (bool success,) = address(rewarder).call(abi.encodeCall(DeepstateRewarderV2.retireAndBurnBalance, ()));
+        (bool success,) = address(rewarder).call(abi.encodeCall(DeepstateRewarderV2.burnBalance, ()));
+        ++authorizedBurnCalls;
         if (!success) {
-            retirementViolation = true;
+            burnViolation = true;
             return;
         }
-        retired = true;
 
-        if (!rewarder.retired()) retirementViolation = true;
-        if (rewarder.owner() != address(0)) retirementViolation = true;
-        if (rewardToken.balanceOf(address(rewarder)) != 0) retirementViolation = true;
-        if (rewardToken.totalSupply() + funding != supplyBefore) retirementViolation = true;
+        totalBurned += balanceBefore;
+        if (rewardToken.balanceOf(address(rewarder)) != 0) burnViolation = true;
+        if (rewardToken.totalSupply() != supplyBefore - balanceBefore) burnViolation = true;
+        if (rewarder.owner() != address(this)) burnViolation = true;
     }
 
-    function attemptRetiredActions(uint32 nonceSeed) external {
-        if (!retired) return;
-        uint32 nonce = nonceSeed | 1;
-        bytes32 order = bytes32(uint256(nonce));
-
-        (bool executeSuccess, bytes memory executeResult,) =
-            orderBook.tryExecute(rewarder, configuredPoolId, BOOK_A, TOKEN0, 1e18, nonce);
-        if (executeSuccess || _selector(executeResult) != DeepstateRewarderV2.RewarderRetired.selector) {
-            retiredActionViolation = true;
-        }
-
-        (bool registerSuccess, bytes memory registerResult) =
-            address(rewarder).call(abi.encodeCall(DeepstateRewarder.registerClaimant, (BOOK_A, order)));
-        if (registerSuccess || _selector(registerResult) != DeepstateRewarderV2.RewarderRetired.selector) {
-            retiredActionViolation = true;
-        }
-
-        DeepstateRewarder.OrderReference[] memory registrations = new DeepstateRewarder.OrderReference[](1);
-        registrations[0] = DeepstateRewarder.OrderReference({bookId: BOOK_A, order: order});
-        (bool batchRegisterSuccess, bytes memory batchRegisterResult) =
-            address(rewarder).call(abi.encodeCall(DeepstateRewarder.registerClaimants, (registrations)));
-        if (batchRegisterSuccess || _selector(batchRegisterResult) != DeepstateRewarderV2.RewarderRetired.selector) {
-            retiredActionViolation = true;
-        }
-
-        (bool distributeSuccess, bytes memory distributeResult) =
-            address(rewarder).call(abi.encodeCall(DeepstateRewarder.distributeRewards, (BOOK_A, order, TOKEN0)));
-        if (distributeSuccess || _selector(distributeResult) != DeepstateRewarderV2.RewarderRetired.selector) {
-            retiredActionViolation = true;
-        }
-
-        DeepstateRewarder.RewardClaim[] memory claims = new DeepstateRewarder.RewardClaim[](1);
-        claims[0] = DeepstateRewarder.RewardClaim({bookId: BOOK_A, order: order, token: TOKEN0});
-        (bool batchDistributeSuccess, bytes memory batchDistributeResult) =
-            address(rewarder).call(abi.encodeCall(DeepstateRewarder.distributeRewardsBatch, (claims)));
-        if (batchDistributeSuccess || _selector(batchDistributeResult) != DeepstateRewarderV2.RewarderRetired.selector)
-        {
-            retiredActionViolation = true;
-        }
-    }
-
-    function mintAndSweepRetiredBalance(uint128 amountSeed) external {
-        if (!retired) return;
-        uint256 amount = bound(amountSeed, 1, type(uint128).max);
+    function attemptUnauthorizedBurn() external {
+        uint256 balanceBefore = rewardToken.balanceOf(address(rewarder));
         uint256 supplyBefore = rewardToken.totalSupply();
-        rewardToken.mint(address(rewarder), amount);
 
-        (bool success,) = address(rewarder).call(abi.encodeCall(DeepstateRewarderV2.burnRetiredBalance, ()));
-        if (!success || rewardToken.balanceOf(address(rewarder)) != 0 || rewardToken.totalSupply() != supplyBefore) {
-            retirementViolation = true;
-        }
+        vm.prank(CLAIMANT);
+        (bool success, bytes memory result) =
+            address(rewarder).call(abi.encodeCall(DeepstateRewarderV2.burnBalance, ()));
+        ++unauthorizedBurnAttempts;
+
+        if (success || _selector(result) != Ownable.Unauthorized.selector) burnViolation = true;
+        if (rewardToken.balanceOf(address(rewarder)) != balanceBefore) burnViolation = true;
+        if (rewardToken.totalSupply() != supplyBefore) burnViolation = true;
     }
 
     function _attemptInvalid(
@@ -350,14 +310,13 @@ contract DeepstateRewarderOperationalInvariantTest is StdInvariant, Test {
         rewarder = handler.rewarder();
         rewardToken = handler.rewardToken();
 
-        bytes4[] memory selectors = new bytes4[](7);
+        bytes4[] memory selectors = new bytes4[](6);
         selectors[0] = handler.executeValid.selector;
         selectors[1] = handler.attemptUnauthorizedExecute.selector;
         selectors[2] = handler.attemptWrongPool.selector;
         selectors[3] = handler.attemptWrongToken.selector;
-        selectors[4] = handler.retireRewarder.selector;
-        selectors[5] = handler.attemptRetiredActions.selector;
-        selectors[6] = handler.mintAndSweepRetiredBalance.selector;
+        selectors[4] = handler.burnRewarderBalance.selector;
+        selectors[5] = handler.attemptUnauthorizedBurn.selector;
 
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
@@ -391,29 +350,11 @@ contract DeepstateRewarderOperationalInvariantTest is StdInvariant, Test {
         assertLt(handler.maxSuccessfulExecuteGas(), handler.ROUTER_HOOK_GAS_LIMIT());
     }
 
-    function invariant_RetirementIsTerminalAndAllRewardBalancesRemainBurnable() public view {
-        assertFalse(handler.retirementViolation());
-        assertFalse(handler.retiredActionViolation());
-
-        if (handler.retired()) {
-            assertTrue(rewarder.retired());
-            assertEq(rewarder.owner(), address(0));
-            assertEq(rewardToken.balanceOf(address(rewarder)), 0);
-            assertEq(rewardToken.totalSupply(), 0);
-            assertEq(rewarder.totalAccrued(handler.TOKEN0()), handler.token0AccruedAtRetirement());
-            assertEq(rewarder.totalAccrued(handler.TOKEN1()), handler.token1AccruedAtRetirement());
-            (uint32 nonce0, uint64 cursor0) = rewarder.rewardees(handler.TOKEN0());
-            (uint32 nonce1, uint64 cursor1) = rewarder.rewardees(handler.TOKEN1());
-            assertEq(nonce0, handler.token0NonceAtRetirement());
-            assertEq(nonce1, handler.token1NonceAtRetirement());
-            assertEq(cursor0, handler.token0CursorAtRetirement());
-            assertEq(cursor1, handler.token1CursorAtRetirement());
-        } else {
-            assertFalse(rewarder.retired());
-            assertEq(rewarder.owner(), address(handler));
-            assertEq(rewardToken.balanceOf(address(rewarder)), uint256(handler.SIDE_CAP()) * 2);
-            assertEq(rewardToken.totalSupply(), uint256(handler.SIDE_CAP()) * 2);
-        }
+    function invariant_OnlyTheOwnerCanBurnTheCompleteRewarderBalance() public view {
+        assertFalse(handler.burnViolation());
+        assertEq(rewarder.owner(), address(handler));
+        assertEq(rewardToken.totalSupply() + handler.totalBurned(), uint256(handler.SIDE_CAP()) * 2);
+        if (handler.authorizedBurnCalls() != 0) assertEq(rewardToken.balanceOf(address(rewarder)), 0);
     }
 }
 
@@ -567,14 +508,9 @@ contract DeepstateRewarderOperationalPropertyTest is Test {
         assertEq(unregisteredRewarder.balances(unregisteredBook, TOKEN1, unregisteredNonce), unregisteredPending);
     }
 
-    function testFuzz_RetirementBurnsFundingAndPermanentlyForfeitsUnpaidClaims(
-        uint32 elapsedSeed,
-        uint160 quantitySeed,
-        uint128 directRefundSeed
-    ) public {
+    function testFuzz_BurningFundingDoesNotDisableAnExistingClaim(uint32 elapsedSeed, uint160 quantitySeed) public {
         uint256 elapsed = bound(elapsedSeed, 1, 30 days);
         uint160 quantity = uint160(bound(quantitySeed, START_QUANTITY, MAX_QUANTITY));
-        uint256 directRefund = bound(directRefundSeed, 1, type(uint128).max);
         uint32 nonce = 23;
         bytes32 order = bytes32(uint256(nonce));
 
@@ -590,24 +526,17 @@ contract DeepstateRewarderOperationalPropertyTest is Test {
 
         uint256 supplyBefore = rewardToken.totalSupply();
         uint256 fundingBefore = rewardToken.balanceOf(address(rewarder));
-        rewarder.retireAndBurnBalance();
-        assertTrue(rewarder.retired());
-        assertEq(rewarder.owner(), address(0));
+        rewarder.burnBalance();
+        assertEq(rewarder.owner(), address(this));
         assertEq(rewardToken.balanceOf(address(rewarder)), 0);
         assertEq(rewardToken.totalSupply(), supplyBefore - fundingBefore);
         assertEq(rewarder.balances(BOOK_ID, TOKEN1, nonce), pending);
 
-        rewardToken.mint(address(rewarder), directRefund);
-        vm.expectRevert(DeepstateRewarderV2.RewarderRetired.selector);
+        rewardToken.mint(address(rewarder), pending);
         rewarder.distributeRewards(BOOK_ID, order, TOKEN1);
-        assertEq(rewardToken.balanceOf(ALICE), 0);
-        assertEq(rewarder.balances(BOOK_ID, TOKEN1, nonce), pending);
-        assertEq(rewardToken.balanceOf(address(rewarder)), directRefund);
-
-        vm.prank(address(0xB0B));
-        rewarder.burnRetiredBalance();
+        assertEq(rewardToken.balanceOf(ALICE), pending);
         assertEq(rewardToken.balanceOf(address(rewarder)), 0);
-        assertEq(rewarder.balances(BOOK_ID, TOKEN1, nonce), pending);
+        assertEq(rewarder.balances(BOOK_ID, TOKEN1, nonce), 0);
     }
 
     function testFuzz_PublicSideSchedulesStayMonotonicBoundedAndQuantityAdjusted(
@@ -667,7 +596,7 @@ contract DeepstateRewarderOperationalPropertyTest is Test {
         _assertRouterSurvivesHook(address(new OperationalGasBurningHook()), quantitySeed);
     }
 
-    function testFuzz_RouterSwallowsRetiredRewarderFailureAndLeavesItsAccountingUnchanged(uint128 quantitySeed) public {
+    function testFuzz_UnlinkingStopsRouterCallsWithoutDisablingTheRewarder(uint128 quantitySeed) public {
         DeepstateV1 router = new DeepstateV1();
         OperationalRouterToken a = new OperationalRouterToken("A", "A");
         OperationalRouterToken b = new OperationalRouterToken("B", "B");
@@ -675,7 +604,7 @@ contract DeepstateRewarderOperationalPropertyTest is Test {
         uint160 quantity = uint160(bound(quantitySeed, 1, type(uint128).max));
         bytes32 configuredPool = router.poolId(address(token0), address(token1));
 
-        DeepstateRewarderV2 retiredRewarder = new DeepstateRewarderV2(
+        DeepstateRewarderV2 unlinkedRewarder = new DeepstateRewarderV2(
             address(this),
             address(router),
             address(rewardToken),
@@ -689,23 +618,29 @@ contract DeepstateRewarderOperationalPropertyTest is Test {
             START_QUANTITY,
             MAX_QUANTITY
         );
-        retiredRewarder.retireAndBurnBalance();
-        router.setPoolHookConfig(address(token0), address(token1), address(retiredRewarder), true, true);
+        router.setPoolHookConfig(address(token0), address(token1), address(unlinkedRewarder), true, true);
+        router.setPoolHookConfig(address(token0), address(token1), address(0), false, false);
 
         _executeGenuineMatch(router, token0, token1, quantity);
 
-        assertTrue(retiredRewarder.retired());
-        assertEq(retiredRewarder.emissionStart(address(token0)), 0);
-        assertEq(retiredRewarder.totalAccrued(address(token0)), 0);
-        (uint32 token0Nonce, uint64 token0Since) = retiredRewarder.rewardees(address(token0));
+        assertEq(unlinkedRewarder.emissionStart(address(token0)), 0);
+        assertEq(unlinkedRewarder.totalAccrued(address(token0)), 0);
+        (uint32 token0Nonce, uint64 token0Since) = unlinkedRewarder.rewardees(address(token0));
         assertEq(token0Nonce, 0);
         assertEq(token0Since, 0);
 
-        assertEq(retiredRewarder.emissionStart(address(token1)), 0);
-        assertEq(retiredRewarder.totalAccrued(address(token1)), 0);
-        (uint32 token1Nonce, uint64 token1Since) = retiredRewarder.rewardees(address(token1));
+        assertEq(unlinkedRewarder.emissionStart(address(token1)), 0);
+        assertEq(unlinkedRewarder.totalAccrued(address(token1)), 0);
+        (uint32 token1Nonce, uint64 token1Since) = unlinkedRewarder.rewardees(address(token1));
         assertEq(token1Nonce, 0);
         assertEq(token1Since, 0);
+
+        vm.prank(address(router));
+        unlinkedRewarder.execute(configuredPool, keccak256("manual-book"), address(token0), 0, 1);
+        assertEq(unlinkedRewarder.emissionStart(address(token0)), block.timestamp);
+        (token0Nonce, token0Since) = unlinkedRewarder.rewardees(address(token0));
+        assertEq(token0Nonce, 1);
+        assertEq(token0Since, block.timestamp);
     }
 
     function _assertRouterSurvivesHook(address hook, uint128 quantitySeed) internal {

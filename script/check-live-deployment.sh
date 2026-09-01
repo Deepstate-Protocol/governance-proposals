@@ -209,8 +209,7 @@ EXPECTED_SAFE_THRESHOLD="$(solidity_uint DEEPSTATE_INC_SAFE_THRESHOLD)"
 EXPECTED_SABLIER_LOCKUP_MIN_FEE_USD="$(solidity_uint SABLIER_LOCKUP_MIN_FEE_USD)"
 EXPECTED_SABLIER_MAX_FEE_USD="$(solidity_uint SABLIER_MAX_FEE_USD)"
 EXPECTED_SABLIER_COMPTROLLER_VERSION="$(solidity_string SABLIER_COMPTROLLER_VERSION)"
-EXPECTED_MINTER_LIVE_SUPPLY_CAP="$(solidity_uint MINTER_LIVE_SUPPLY_CAP)"
-EXPECTED_MINTER_GROSS_ISSUANCE_CAP="$(solidity_uint MINTER_GROSS_ISSUANCE_CAP)"
+EXPECTED_MINTER_MAX_SUPPLY="$(solidity_uint MINTER_MAX_SUPPLY)"
 EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM="$(solidity_uint MINIMUM_ACTIVATION_ISSUANCE_HEADROOM)"
 EXPECTED_LEGACY_REWARDER_SIDE_EMISSION_CAP="$(solidity_uint LEGACY_REWARDER_SIDE_EMISSION_CAP)"
 EXPECTED_LEGACY_REWARDER_EMISSION_DURATION="$(solidity_uint LEGACY_REWARDER_EMISSION_DURATION)"
@@ -319,21 +318,12 @@ require_distinct_address \
 
 deep_total_supply="$(rpc_uint "$DEEP" 'totalSupply()(uint256)')"
 maximum_supply_with_minimum_headroom="$(
-    decimal_subtract "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"
+    decimal_subtract "$EXPECTED_MINTER_MAX_SUPPLY" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"
 )"
 if ! decimal_greater_than_or_equal "$maximum_supply_with_minimum_headroom" "$deep_total_supply"; then
-    printf 'DEEP supply leaves less than the required %s base-unit activation headroom: supply %s, cap %s\n' \
+    printf 'DEEP supply leaves less than the required %s base-unit activation headroom: supply %s, maximum supply %s\n' \
         "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" "$deep_total_supply" \
-        "$EXPECTED_MINTER_LIVE_SUPPLY_CAP" >&2
-    exit 1
-fi
-maximum_gross_baseline_with_minimum_headroom="$(
-    decimal_subtract "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM"
-)"
-if ! decimal_greater_than_or_equal "$maximum_gross_baseline_with_minimum_headroom" "$deep_total_supply"; then
-    printf 'DEEP supply leaves less than the required %s base-unit activation gross headroom: supply %s, cap %s\n' \
-        "$EXPECTED_MINIMUM_ACTIVATION_ISSUANCE_HEADROOM" "$deep_total_supply" \
-        "$EXPECTED_MINTER_GROSS_ISSUANCE_CAP" >&2
+        "$EXPECTED_MINTER_MAX_SUPPLY" >&2
     exit 1
 fi
 

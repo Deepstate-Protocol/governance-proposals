@@ -27,15 +27,19 @@ contract OfflineDeploymentDeepMock {
     }
 }
 
-contract OfflineDeploymentUSDGMock {
-    function decimals() external pure returns (uint8) {
-        return 6;
-    }
-}
-
 contract OfflineDeploymentLegacyRewarderMock {
-    function rewardToken() external pure returns (address) {
-        return DeepstateAddresses.DEEP;
+    function token0() external pure returns (address) {
+        return DeepstateAddresses.USDG;
+    }
+
+    function token1() external pure returns (address) {
+        return DeepstateAddresses.NVDA;
+    }
+
+    function totalAccrued(address token) external pure returns (uint96) {
+        if (token == DeepstateAddresses.USDG) return 700e18;
+        if (token == DeepstateAddresses.NVDA) return 300e18;
+        return 0;
     }
 }
 
@@ -71,7 +75,7 @@ contract DeployRewarderV2SystemInvariantHarness is DeployRewarderV2System {
 
     function verifyBootstrapFromPlan() external view {
         DeploymentPlan memory plan = _plan();
-        _verifyBootstrap(plan.dgp001Bootstrap, plan.minterController);
+        _verifyBootstrap(plan.dgp001Bootstrap);
     }
 
     function verifyV1FromPlan() external view {
@@ -124,14 +128,12 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 
         OfflineDeploymentCodeMock codeMock = new OfflineDeploymentCodeMock();
         OfflineDeploymentDeepMock deepMock = new OfflineDeploymentDeepMock();
-        OfflineDeploymentUSDGMock usdGMock = new OfflineDeploymentUSDGMock();
         OfflineDeploymentLegacyRewarderMock legacyRewarderMock = new OfflineDeploymentLegacyRewarderMock();
 
         vm.etch(DeepstateAddresses.DEEP, address(deepMock).code);
         vm.etch(DeepstateAddresses.SABLIER_LOCKUP, address(codeMock).code);
         vm.etch(DeepstateAddresses.ROUTER, address(codeMock).code);
         vm.etch(DeepstateAddresses.REWARDER, address(legacyRewarderMock).code);
-        vm.etch(DeepstateAddresses.USDG, address(usdGMock).code);
         vm.etch(DeepstateAddresses.CREATE2_DEPLOYER, CREATE2_PROXY_RUNTIME);
     }
 
@@ -141,11 +143,7 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
             _deployMinterRecorded();
         } else if (component % 4 == 1) {
             ++bootstrapAttempts;
-            // The Bootstrap derives and pins its configuration from the Minter Controller at construction, so this
-            // attempt fails closed until the planned Minter exists.
-            vm.record();
-            try deployment.deployBootstrapFromPlan() {} catch {}
-            _recordExternalProtocolWrites();
+            _deployBootstrapRecorded();
         } else if (component % 4 == 2) {
             ++v1Attempts;
             _deployV1Recorded();
@@ -219,18 +217,18 @@ contract DeployRewarderV2SystemInvariantHandler is Test {
 }
 
 contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
-    address internal constant EXPECTED_MINTER = 0xA2D743FE8387Ea6030F7aD2BdCa2A7556EA495B5;
-    address internal constant EXPECTED_BOOTSTRAP = 0x46f59ca750D4781b882a8F92BE11F0b23f537932;
+    address internal constant EXPECTED_MINTER = 0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa;
+    address internal constant EXPECTED_BOOTSTRAP = 0x310594e99815E00F7a8c866bd1578DC2Db00C975;
     address internal constant EXPECTED_V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
-    address internal constant EXPECTED_FACTORY = 0xFF9E7971aB6E7111BB2F0aDA57a8E2c1256c3f98;
+    address internal constant EXPECTED_FACTORY = 0xA847C1fE66D31b8f6416741971F89a958d9AC2D9;
     bytes32 internal constant EXPECTED_MINTER_INIT_CODE_HASH =
-        0xc36c59bdaf1845441031fec37a852bccc0780e13ac92c643612f34db191ecf6e;
+        0xf474c741a197c764621efb61e47e135b3901c53d1dd3bd2e5db4a63e15a7ca51;
     bytes32 internal constant EXPECTED_BOOTSTRAP_INIT_CODE_HASH =
-        0x4430bc05d7be72ddde468617ac1e6973c63a585d7cf64d6397eea763687a9f88;
+        0x51621e9b0a57fec483593d59d66e7355beb5def5a11476b9e4be4cb61ee0171d;
     bytes32 internal constant EXPECTED_V1_INIT_CODE_HASH =
         0x178de4fee3bfd6b50a70f2710907253ab68e1ecfdac3a9acf5b44880fd61ad32;
     bytes32 internal constant EXPECTED_FACTORY_INIT_CODE_HASH =
-        0x289a57fb940d16d403c809c232adb6e38ff9430a2fbb3ed5556e87b28c1a981e;
+        0x6c742d3e580c46a1e42b1dea97da9fe55604eb86c25956f335f83a3b38cab13a;
 
     DeployRewarderV2SystemInvariantHandler internal handler;
     DeployRewarderV2SystemInvariantHarness internal deployment;
@@ -295,42 +293,20 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         }
     }
 
-    function invariant_BootstrapCanExistOnlyAfterItsMinterControllerDependency() public view {
-        if (EXPECTED_BOOTSTRAP.code.length != 0) assertGt(EXPECTED_MINTER.code.length, 0);
-    }
-
     function invariant_DeploymentNeverActivatesGovernancePermissionsOrMutableState() public view {
         assertFalse(handler.externalProtocolWriteViolation());
 
         if (EXPECTED_MINTER.code.length != 0) {
             DeepstateMinterController minter = DeepstateMinterController(EXPECTED_MINTER);
             assertEq(minter.owner(), DeepstateAddresses.GOVERNOR);
-            assertEq(minter.grossIssued(), 0);
+            assertEq(minter.maxSupply(), DeepstateAddresses.MINTER_MAX_SUPPLY);
             assertEq(minter.tokenAdministrationEndsAt(), 0);
         }
         if (EXPECTED_BOOTSTRAP.code.length != 0) {
             DGP001Bootstrap bootstrap = DGP001Bootstrap(EXPECTED_BOOTSTRAP);
-            assertEq(bootstrap.ENDOWMENT_PERCENT(), 30);
-            assertEq(bootstrap.VESTING_DURATION(), 365 days);
-            assertEq(bootstrap.STREAM_GRANULARITY(), 1 seconds);
             assertEq(bootstrap.governor(), DeepstateAddresses.GOVERNOR);
-            assertEq(address(bootstrap.minterController()), EXPECTED_MINTER);
             assertEq(address(bootstrap.deepstateToken()), DeepstateAddresses.DEEP);
-            assertEq(address(bootstrap.sablierLockup()), DeepstateAddresses.SABLIER_LOCKUP);
-            assertEq(address(bootstrap.legacyRewarder()), DeepstateAddresses.REWARDER);
-            assertEq(bootstrap.recipient(), DeepstateAddresses.DEEPSTATE_INC_SAFE);
-            assertFalse(bootstrap.executed());
-            assertEq(bootstrap.snapshotBlock(), 0);
-            assertEq(bootstrap.snapshotAt(), 0);
-            assertEq(bootstrap.snapshotToken0(), address(0));
-            assertEq(bootstrap.snapshotToken1(), address(0));
-            assertEq(bootstrap.token0Accrued(), 0);
-            assertEq(bootstrap.token1Accrued(), 0);
-            assertEq(bootstrap.totalAccrued(), 0);
-            assertEq(bootstrap.endowmentAmount(), 0);
-            assertEq(bootstrap.preexistingBalanceBurned(), 0);
-            assertEq(bootstrap.postEndowmentSupply(), 0);
-            assertEq(bootstrap.streamId(), 0);
+            assertEq(bootstrap.endowmentAmount(), 300e18);
             assertFalse(
                 bootstrap.deepstateToken().hasRole(bootstrap.deepstateToken().MINTER_ROLE(), EXPECTED_BOOTSTRAP)
             );
@@ -343,7 +319,6 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
             assertEq(factory.owner(), DeepstateAddresses.GOVERNOR);
             assertEq(factory.operator(), address(0));
             assertEq(factory.nextDeploymentAt(), 0);
-            assertEq(factory.fundingCommitted(), 0);
             assertEq(DeepstateMinterController(EXPECTED_MINTER).rolesOf(EXPECTED_FACTORY), 0);
             assertEq(DeepstateV1Controller(EXPECTED_V1_CONTROLLER).rolesOf(EXPECTED_FACTORY), 0);
         }
@@ -385,13 +360,10 @@ contract DeployRewarderV2SystemInvariantTest is StdInvariant, Test {
         deployment.validateExistingFromPlan();
     }
 
-    function test_BootstrapCannotDeployBeforeItsMinterControllerDependency() public {
-        vm.expectRevert();
+    function test_BootstrapDeploymentIsIndependentOfTheMinterController() public {
         deployment.deployBootstrapFromPlan();
-        assertEq(EXPECTED_BOOTSTRAP.code.length, 0);
-
-        deployment.deployMinterFromPlan();
-        deployment.deployBootstrapFromPlan();
+        assertGt(EXPECTED_BOOTSTRAP.code.length, 0);
+        assertEq(EXPECTED_MINTER.code.length, 0);
         deployment.verifyBootstrapFromPlan();
     }
 

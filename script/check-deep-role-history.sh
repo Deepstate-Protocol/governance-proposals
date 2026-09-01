@@ -190,7 +190,7 @@ else
     )"
     expected_activation_history="$(printf '%b\n' \
         "$ROLE_GRANTED_TOPIC\t$MINTER_ROLE\t$bootstrap_topic\t$governor_topic" \
-        "$ROLE_REVOKED_TOPIC\t$MINTER_ROLE\t$bootstrap_topic\t$bootstrap_topic" \
+        "$ROLE_REVOKED_TOPIC\t$MINTER_ROLE\t$bootstrap_topic\t$governor_topic" \
         "$ROLE_GRANTED_TOPIC\t$DEFAULT_ADMIN_ROLE\t$minter_controller_topic\t$governor_topic" \
         "$ROLE_REVOKED_TOPIC\t$DEFAULT_ADMIN_ROLE\t$governor_topic\t$governor_topic" \
         "$ROLE_GRANTED_TOPIC\t$MINTER_ROLE\t$minter_controller_topic\t$minter_controller_topic"

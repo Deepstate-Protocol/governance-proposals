@@ -38,7 +38,6 @@ contract DGP002Test is Test {
     uint256 private constant _COMBINED_ISSUANCE = 14_285_714_285714285714285713;
     bytes32 private constant _MINTED_WITH_VESTING_TOPIC =
         keccak256("MintedWithVesting(address,address,uint256,address,uint256,uint256)");
-    bytes32 private constant _GROSS_ISSUANCE_RECORDED_TOPIC = keccak256("GrossIssuanceRecorded(uint256,uint256)");
     bytes32 private constant _TRANSFER_TOPIC = keccak256("Transfer(address,address,uint256)");
     bytes32 private constant _ERC1967_IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
@@ -51,7 +50,6 @@ contract DGP002Test is Test {
 
     struct Snapshot {
         uint256 supply;
-        uint256 grossIssued;
         uint256 nextStreamId;
         uint256 governorBalance;
         uint256 sablierDeepBalance;
@@ -114,9 +112,6 @@ contract DGP002Test is Test {
         _executeAction(targets, values, calldatas, 0);
         Snapshot memory afterMint = _snapshot();
         assertEq(afterMint.supply - beforeState.supply, proposal.VOLUNTEER_A_AMOUNT() + proposal.VESTING_PER_MINT());
-        assertEq(
-            afterMint.grossIssued - beforeState.grossIssued, proposal.VOLUNTEER_A_AMOUNT() + proposal.VESTING_PER_MINT()
-        );
         assertEq(afterMint.nextStreamId, beforeState.nextStreamId + 1);
         assertEq(afterMint.governorBalance, beforeState.governorBalance);
         assertEq(afterMint.volunteerABalance - beforeState.volunteerABalance, proposal.VOLUNTEER_A_AMOUNT());
@@ -197,7 +192,6 @@ contract DGP002Test is Test {
         Snapshot memory afterState = _snapshot();
         assertEq(governor.state(proposalId), 4);
         assertEq(afterState.supply, beforeState.supply);
-        assertEq(afterState.grossIssued, beforeState.grossIssued);
         assertEq(afterState.nextStreamId, beforeState.nextStreamId);
         assertEq(afterState.governorBalance, beforeState.governorBalance);
         assertEq(afterState.sablierDeepBalance, beforeState.sablierDeepBalance);
@@ -327,7 +321,6 @@ contract DGP002Test is Test {
     function _snapshot() private view returns (Snapshot memory state_) {
         DeepstateToken deep = DeepstateToken(DeepstateAddresses.DEEP);
         state_.supply = deep.totalSupply();
-        state_.grossIssued = DeepstateMinterController(DeepstateAddresses.MINTER_CONTROLLER).grossIssued();
         state_.nextStreamId = ISablierDGP002View(DeepstateAddresses.SABLIER_LOCKUP).nextStreamId();
         state_.governorBalance = deep.balanceOf(DeepstateAddresses.GOVERNOR);
         state_.sablierDeepBalance = deep.balanceOf(DeepstateAddresses.SABLIER_LOCKUP);
@@ -341,7 +334,6 @@ contract DGP002Test is Test {
     function _assertSuccessfulDGP002Deltas(Snapshot memory beforeState) private view {
         Snapshot memory afterState = _snapshot();
         assertEq(afterState.supply - beforeState.supply, _COMBINED_ISSUANCE);
-        assertEq(afterState.grossIssued - beforeState.grossIssued, _COMBINED_ISSUANCE);
         assertEq(afterState.nextStreamId, beforeState.nextStreamId + 3);
         assertEq(afterState.governorBalance, beforeState.governorBalance);
         assertEq(afterState.sablierDeepBalance - beforeState.sablierDeepBalance, proposal.TOTAL_VESTING_AMOUNT());
@@ -368,8 +360,6 @@ contract DGP002Test is Test {
 
     function _assertMintReceipt(Vm.Log[] memory logs, Snapshot memory beforeState) private view {
         uint256 mintEventCount;
-        uint256 grossEventCount;
-        uint256 cumulativeIssuance;
 
         for (uint256 i; i < logs.length; ++i) {
             Vm.Log memory entry = logs[i];
@@ -386,19 +376,10 @@ contract DGP002Test is Test {
                 assertEq(vestingAmount, proposal.VESTING_PER_MINT());
                 assertEq(streamId, beforeState.nextStreamId + mintEventCount);
                 ++mintEventCount;
-            } else if (entry.topics[0] == _GROSS_ISSUANCE_RECORDED_TOPIC) {
-                assertLt(grossEventCount, 3);
-                (uint256 issued, uint256 totalGrossIssued) = abi.decode(entry.data, (uint256, uint256));
-                uint256 expectedIssued = _volunteerAmountAt(grossEventCount) + proposal.VESTING_PER_MINT();
-                cumulativeIssuance += expectedIssued;
-                assertEq(issued, expectedIssued);
-                assertEq(totalGrossIssued, beforeState.grossIssued + cumulativeIssuance);
-                ++grossEventCount;
             }
         }
 
         assertEq(mintEventCount, 3);
-        assertEq(grossEventCount, 3);
         _assertDeepTransferReceipt(logs);
     }
 

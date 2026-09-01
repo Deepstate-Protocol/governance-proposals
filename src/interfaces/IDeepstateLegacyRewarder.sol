@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @notice Canonical legacy Rewarder interface used to validate migration state and snapshot cumulative emissions.
+/// @notice Canonical legacy Rewarder interface used to validate replacement state and snapshot cumulative emissions.
 interface IDeepstateLegacyRewarder {
     function deepstate() external view returns (address);
     function rewardToken() external view returns (address);

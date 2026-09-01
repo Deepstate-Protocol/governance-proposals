@@ -31,7 +31,6 @@ contract DeepstateMinterControllerLiveSablierTest is Test {
             address(deep),
             DeepstateAddresses.SABLIER_LOCKUP,
             DeepstateAddresses.DEEPSTATE_INC_SAFE,
-            1_000_000e18,
             1_000_000e18
         );
         deep.grantRole(deep.DEFAULT_ADMIN_ROLE(), address(controller));

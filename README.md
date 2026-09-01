@@ -19,12 +19,12 @@ The 25-commit implementation delta from `deepstate-protocol@codex/rewarder-v2` w
 Its production contracts, supporting interfaces, behavioral tests, Sablier v4.0.1 implementation test, and mock are
 first-party files in `src/` and `test/`. In addition to the local implementation test, `make check-live` exercises the
 actual Robinhood Lockup and Deepstate Inc Safe on a fork. Unchanged protocol and matching-engine contracts remain
-pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinned `deepstate-protocol` library; that
-base exposes a no-op lifecycle extension hook which V2 overrides to enforce terminal retirement without copying the
-protocol's reward math into this repository.
+pinned libraries. Rewarder V2 directly inherits the Rewarder base from the pinned `deepstate-protocol` library and
+adds only an owner-only function that burns the contract's complete reward-token balance. The protocol's reward math
+and accounting remain inherited rather than copied into this repository.
 
 The system contracts have not been deployed. The repository includes a read-only deterministic CREATE2 plan, release
-manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact ten-action
+manifest template, pinned live dependencies, a live Sablier compatibility test, and DGP-001's exact fifteen-action
 Governor payload with a provisional pre-deployment ID. The payload is deliberately not submission-ready until its
 predicted targets are actual reviewed deployments and the final archive-fork release gates pass. See
 [`docs/REWARDER_V2.md`](docs/REWARDER_V2.md) for the authority model and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for
@@ -32,11 +32,24 @@ the production release procedure. The proposal-specific external transaction seq
 [`docs/DGP-001-TRANSACTION-RUNBOOK.md`](docs/DGP-001-TRANSACTION-RUNBOOK.md) and
 [`docs/DGP-002-TRANSACTION-RUNBOOK.md`](docs/DGP-002-TRANSACTION-RUNBOOK.md).
 
-The current release policy caps live DEEP supply and permanent Controller issuance at 3 billion DEEP. DGP-001 will
-atomically create a one-year endowment equal to 30% of the legacy Rewarder's execution-time accrued emissions, activate
-the exact 730-day mint policy, and replace the idle NVDA/USDG V1 hook with a fully funded Rewarder V2 capped at
-100 million DEEP over exactly 365 days. Factory markets use two 50-million side caps, a three-day cooldown, and a
-1-billion-DEEP lifetime primary-funding budget for ten total markets; there is no later market top-up path.
+The current release policy caps live DEEP supply at 3 billion DEEP. When the DGP-001
+Bootstrap is deployed, its constructor freezes `floor((token0 totalAccrued + token1 totalAccrued) * 30 / 100)` from the
+legacy Rewarder; later accrual, including accrual during voting, is not included. DGP-001 atomically gives that contract
+temporary mint authority, calls its minimal `mint()` to send the fixed amount to the Governor, revokes the authority,
+and has the Governor directly approve Sablier and create the one-year endowment stream as both funder and sender. The
+Bootstrap performs no runtime identity, idleness, cap, dust, snapshot, or one-use validation; those release conditions
+remain offchain gates, while operational one-use comes from proposal execution plus immediate role revocation. The
+same batch activates the exact 730-day mint policy and replaces the operationally prepared NVDA/USDG V1 hook with a fully funded Rewarder V2
+capped at 100 million DEEP over exactly 365 days. Factory markets use two 50-million side caps and a global three-day
+cooldown; each launch mints exactly 100 million primary DEEP, with the Minter Controller's 3-billion maximum supply
+providing the issuance bound instead of a separate Factory budget. Burns reduce live supply and therefore restore
+headroom under that maximum. There is no later market top-up path. Factory callers supply an already-canonical
+`token0`/`token1` pair, a whole-token maximum and activation flag for
+each side, and every reward side starts at one whole unit. The Factory reads `decimals()` for each nonzero token and
+treats `address(0)` as an 18-decimal native asset. A launch may directly replace whatever Router hook is currently
+installed for the pair, leaving the previous hook contract and its token balance untouched, and the same pair may be
+launched again after the cooldown. Unlinking a Router hook and optionally burning a Factory-owned Rewarder's balance
+are separate operator actions; the Factory stores neither an active-Rewarder registry nor a launch-history mapping.
 
 ## Live target
 
@@ -80,11 +93,11 @@ proposals/DGP-NNN.md                    voter-facing description body
 script/proposals/DGPNNN/Deploy.s.sol   proposal-specific submission script
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
-src/DGP001Bootstrap.sol                one-use legacy-emissions endowment action for DGP-001
+src/DGP001Bootstrap.sol                constructor-frozen endowment amount and temporary mint action for DGP-001
 src/DeepstateRewarderV2.sol            candidate market rewarder implementation
 lib/deepstate-contracts/               pinned matching-engine source dependency
 lib/deepstate-protocol/                pinned protocol source, including the inherited Rewarder base
-src/DeepstateProposal.sol              deterministic payload validation and proposal ID
+script/DeepstateProposal.sol           deterministic payload validation and proposal ID
 script/DeepstateProposalScript.s.sol   chain, Governor, STATE, and launch preflight
 script/DeployRewarderV2System.s.sol    read-only plan and guarded idempotent CREATE2 deployment
 script/config/DeepstateAddresses.sol   canonical live deployment and release-policy registry
@@ -282,7 +295,7 @@ forge script \
 
 `verifyExecution()` regenerates the pinned payload, checks its registered proposer, requires the live `Executed`
 state and direct-execution mode, and reruns the proposal-specific current postconditions. Run it immediately after
-execution; later authorized mints, market launches, claims, removals, or operator changes can legitimately invalidate
+execution; later authorized mints, market launches, claims, hook unlinks, balance burns, or operator changes can legitimately invalidate
 exact initial-state checks.
 
 Production-chain Foundry broadcast artifacts are intentionally not ignored; preserve them with the reviewed commit so

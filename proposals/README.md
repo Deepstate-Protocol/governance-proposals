@@ -20,5 +20,5 @@ restriction before computing the description hash and pinned proposal ID.
 
 | Proposal | Status | Summary |
 | --- | --- | --- |
-| [`DGP-001`](DGP-001.md) | Pre-deployment payload candidate | Establish the Deepstate Inc endowment through a one-use Bootstrap, activate controlled minting, and atomically replace the live Rewarder with Rewarder V2. |
+| [`DGP-001`](DGP-001.md) | Pre-deployment payload candidate | Mint the Bootstrap's deployment-frozen endowment amount to the Governor for a direct Sablier stream, activate controlled minting and the generic-pair Factory, and atomically replace the live Rewarder with Rewarder V2. |
 | [`DGP-002`](DGP-002.md) | Sequential pre-deployment payload candidate | Allocate exactly 10 million DEEP to three volunteer team members through three controlled mints. |

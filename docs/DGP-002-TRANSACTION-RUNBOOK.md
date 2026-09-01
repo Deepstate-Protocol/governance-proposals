@@ -16,7 +16,7 @@ DGP-001 execution and rerun the suite without deployment or market-idleness mock
    rejecting every unknown or temporary role assignment.
 2. **Run DGP-002's submission gates without broadcasting.** Call `validateSubmissionPreconditions()`. It requires the
    pinned DGP-001 proposal to be executed, the reviewed Controller/Factory/Router authority graph to remain intact,
-   controlled minting to remain inside its 730-day term, enough live-supply and permanent gross-issuance headroom for
+   controlled minting to remain inside its 730-day term, enough headroom below the immutable 3-billion-DEEP maximum supply for
    `14,285,714.285714285714285713 DEEP`, and enough time for the live voting delay, voting period, maximum late-quorum
    extension, and an execution buffer.
 3. **Submit one proposal transaction.** The intended proposer
@@ -27,7 +27,7 @@ DGP-001 execution and rerun the suite without deployment or market-idleness mock
 5. **Run the execution gates without broadcasting.** Repeat
    `bash script/check-deep-role-history.sh "$role_snapshot" post-activation` at a fresh snapshot and call
    `validateExecutionPreconditions()`. Confirm the pinned proposal is still `Succeeded`, controlled minting is still
-   active, and both caps still have complete issuance headroom.
+   active, and the maximum supply still has complete issuance headroom.
 6. **Execute one atomic Governor transaction.** Any address calls
    `Governor.execute(targets, values, calldatas, keccak256(bytes(description)))`. No ETH is required. Failure of the
    mint or Sablier deposit reverts the entire execution and leaves the proposal `Succeeded`.
@@ -63,8 +63,8 @@ or initial unlock. Because the Controller floors each call's 30/70 calculation i
 
 ## Required receipt and state deltas
 
-- DEEP total supply and Minter Controller `grossIssued` each increase by exactly
-  `14,285,714.285714285714285713 DEEP`.
+- DEEP total supply increases by exactly `14,285,714.285714285714285713 DEEP` and remains at or below the Minter
+  Controller's immutable 3-billion-DEEP maximum supply.
 - Each volunteer balance increases by its exact allocation, regardless of any pre-existing balance.
 - The Governor's DEEP balance after execution equals its pre-execution balance.
 - Exactly three controller-created streams each contain `1,428,571.428571428571428571 DEEP`, with the Controller as
@@ -73,6 +73,7 @@ or initial unlock. Because the Controller floors each call's 30/70 calculation i
 - The Minter Controller finishes with zero Sablier allowance; unsolicited DEEP transfers do not affect execution.
 - A replay attempt fails because the Governor proposal is already `Executed`.
 
-DGP-002 intentionally also requires DGP-001's delegated authority and active NVDA Rewarder V2 state to remain intact.
-If the operator retires that market or governance changes those authorities before DGP-002 executes, the proposal
-reverts and must be reconsidered rather than paying under a materially different post-DGP-001 system state.
+DGP-002 intentionally also requires DGP-001's delegated authority and current NVDA/USDG Router hook to remain intact.
+Factory hook unlinking and Factory-owned Rewarder balance burning are independent operator actions. The release gate
+checks the current hook, but DGP-002 does not inspect the Rewarder's DEEP balance; a separate balance check is therefore
+required if operators want to exclude an intervening burn before execution.
