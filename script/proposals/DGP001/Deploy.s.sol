@@ -81,7 +81,7 @@ interface ISafeDGP001View {
 contract DeployDGP001 is DeepstateProposalScript {
     address internal constant PROPOSER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
     uint256 internal constant EXPECTED_PROPOSAL_ID =
-        21_670_168_054_235_862_623_105_807_725_466_940_170_458_221_861_077_590_322_055_092_013_716_138_824_414;
+        33_161_487_084_610_271_917_076_740_918_010_062_530_472_729_255_585_374_721_356_065_356_526_635_853_477;
 
     uint256 private constant _ACTION_COUNT = 15;
     bytes32 private constant _TOKEN_MINTER_ROLE = keccak256("MINTER_ROLE");

@@ -1,6 +1,8 @@
 SHELL := bash
 
-.PHONY: build check check-dependencies check-layout check-live fmt invariants lint plan-deployment test
+.PHONY: build check check-dependencies check-layout check-live deploy-contracts fmt invariants lint register-dgp-001 register-dgp-002 test
+
+ACCOUNT ?= deepstate
 
 fmt:
 	forge fmt --check
@@ -34,8 +36,16 @@ check-live:
 		ROBINHOOD_RPC_URL="$$live_rpc" forge test --force \
 			--match-path 'test/live/DeepstateMinterControllerLiveSablier.t.sol' -vvv --threads 0
 
-plan-deployment:
-	forge script script/DeployRewarderV2System.s.sol:DeployRewarderV2System \
-		--sig 'run()' --rpc-url robinhood -vvv
+deploy-contracts:
+	forge script script/DeployContracts.s.sol:DeployContracts \
+		--rpc-url robinhood --broadcast --slow -vvvv
+
+register-dgp-001:
+	forge script script/DeployDGP001.s.sol:DeployDGP001 \
+		--rpc-url robinhood --account "$(ACCOUNT)" --broadcast --slow -vvvv
+
+register-dgp-002:
+	forge script script/DeployDGP002.s.sol:DeployDGP002 \
+		--rpc-url robinhood --account "$(ACCOUNT)" --broadcast --slow -vvvv
 
 check: fmt lint check-dependencies check-layout build test

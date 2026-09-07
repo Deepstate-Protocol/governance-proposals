@@ -6,7 +6,6 @@ import {Vm} from "forge-std/Vm.sol";
 
 import {DeployDGP001, IDeepstateV1DGP001View} from "../../../script/proposals/DGP001/Deploy.s.sol";
 import {DeployDGP002, ISablierDGP002View} from "../../../script/proposals/DGP002/Deploy.s.sol";
-import {DeployRewarderV2System} from "../../../script/DeployRewarderV2System.s.sol";
 import {DeepstateAddresses} from "../../../script/config/DeepstateAddresses.sol";
 import {DeepstateMinterController} from "../../../src/DeepstateMinterController.sol";
 import {IDeepstateGovernor} from "../../../src/interfaces/IDeepstateGovernor.sol";
@@ -16,23 +15,11 @@ interface ILegacyRewarderDGP002 {
     function rewardees(address token) external view returns (uint32 orderNonce, uint64 startedAt);
 }
 
-contract DGP002DeploymentHarness is DeployRewarderV2System {
-    function deployPinnedContracts() external {
-        DeploymentPlan memory plan = _plan();
-        _validateExistingDeployments(plan);
-        _deployIfMissing(MINTER_SALT, plan.minterInitCode, plan.minterController);
-        _deployIfMissing(DGP001_BOOTSTRAP_SALT, plan.bootstrapInitCode, plan.dgp001Bootstrap);
-        _deployIfMissing(V1_CONTROLLER_SALT, plan.v1InitCode, plan.v1Controller);
-        _deployIfMissing(FACTORY_SALT, plan.factoryInitCode, plan.rewarderFactory);
-        _validateExistingDeployments(plan);
-    }
-}
-
 contract DGP002Test is Test {
-    uint256 internal constant FORK_BLOCK = 50358350;
-    bytes32 internal constant FORK_BLOCK_HASH = 0xb03f9d4fce26314175d042ab6a65bfaafb83cad8c95a40c345901113153bf6c3;
+    uint256 internal constant FORK_BLOCK = 52005951;
+    bytes32 internal constant FORK_BLOCK_HASH = 0x171944f34f37a0ec4bdc941a27968441c513039f841a5acdc5b404208cec3c90;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x6437cd5365c26eee8f7cb5c9a954432ca7ace5ed69007d2d64e67874e9c308e0;
+        0x4b78c9b8ab018c6146216e2eb9f5df589a3d4b3a02865fdc70eaf9717d7fdfe4;
     address internal constant QUORUM_VOTER = 0x5F43Cd8B5Eead549de4444a644B4Cb425A4ea5b2;
 
     uint256 private constant _COMBINED_ISSUANCE = 14_285_714_285714285714285713;
@@ -46,7 +33,6 @@ contract DGP002Test is Test {
 
     DeployDGP001 internal dgp001;
     DeployDGP002 internal proposal;
-    DGP002DeploymentHarness internal deployment;
 
     struct Snapshot {
         uint256 supply;
@@ -62,8 +48,7 @@ contract DGP002Test is Test {
     function setUp() public {
         dgp001 = new DeployDGP001();
         proposal = new DeployDGP002();
-        deployment = new DGP002DeploymentHarness();
-        vm.makePersistent(address(dgp001), address(proposal), address(deployment));
+        vm.makePersistent(address(dgp001), address(proposal));
     }
 
     function testProposalPayload() public view {
@@ -132,26 +117,59 @@ contract DGP002Test is Test {
     }
 
     function testFullGovernorLifecycle() public {
-        _setUpActivatedFork();
-        proposal.validateSubmissionPreconditions();
+        _setUpBaseFork();
         IDeepstateGovernor governor = IDeepstateGovernor(DeepstateAddresses.GOVERNOR);
+        (
+            address[] memory dgp001Targets,
+            uint256[] memory dgp001Values,
+            bytes[] memory dgp001Calldatas,
+            string memory dgp001Description
+        ) = dgp001.proposal();
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory description) =
             proposal.proposal();
 
+        dgp001.validateSubmissionPreconditions();
+        vm.prank(dgp001.proposer());
+        uint256 dgp001Id = governor.propose(dgp001Targets, dgp001Values, dgp001Calldatas, dgp001Description);
+        assertEq(dgp001Id, dgp001.expectedProposalId());
+        assertEq(governor.state(dgp001Id), 0);
+
+        // DGP-002 is intentionally registered while DGP-001 is still Pending so both votes can run in parallel.
+        proposal.validateSubmissionPreconditions();
         vm.prank(proposal.proposer());
         uint256 proposalId = governor.propose(targets, values, calldatas, description);
         assertEq(proposalId, proposal.expectedProposalId());
         assertEq(governor.proposalProposer(proposalId), proposal.proposer());
         assertFalse(governor.proposalNeedsQueuing(proposalId));
+        assertEq(governor.state(proposalId), 0);
 
+        uint256 dgp001Snapshot = governor.proposalSnapshot(dgp001Id);
         uint256 snapshot = governor.proposalSnapshot(proposalId);
+        if (dgp001Snapshot > snapshot) snapshot = dgp001Snapshot;
         vm.warp(snapshot + 1);
         assertGe(governor.getVotes(QUORUM_VOTER, snapshot), governor.quorum(snapshot));
         vm.prank(QUORUM_VOTER);
+        governor.castVote(dgp001Id, 1);
+        vm.prank(QUORUM_VOTER);
         governor.castVote(proposalId, 1);
 
-        vm.warp(governor.proposalDeadline(proposalId) + 1);
+        uint256 dgp001Deadline = governor.proposalDeadline(dgp001Id);
+        uint256 deadline = governor.proposalDeadline(proposalId);
+        if (dgp001Deadline > deadline) deadline = dgp001Deadline;
+        vm.warp(deadline + 1);
+        assertEq(governor.state(dgp001Id), 4);
         assertEq(governor.state(proposalId), 4);
+
+        vm.expectRevert(abi.encodeWithSelector(DeployDGP002.PreconditionFailed.selector, 6));
+        proposal.validateExecutionPreconditions();
+
+        _clearLegacyMarket();
+        dgp001.validateActivationPreconditions();
+        governor.execute(dgp001Targets, dgp001Values, dgp001Calldatas, keccak256(bytes(dgp001Description)));
+        assertEq(governor.state(dgp001Id), 7);
+        assertEq(dgp001.verifyExecution(), dgp001Id);
+        vm.clearMockedCalls();
+
         proposal.validateExecutionPreconditions();
         Snapshot memory beforeState = _snapshot();
         uint256 executedAt = block.timestamp;
@@ -220,16 +238,17 @@ contract DGP002Test is Test {
     }
 
     function _setUpActivatedFork() private {
+        _setUpBaseFork();
+        _executeDGP001ThroughGovernor();
+        vm.clearMockedCalls();
+    }
+
+    function _setUpBaseFork() private {
         vm.createSelectFork(vm.rpcUrl("robinhood"), FORK_BLOCK + 1);
         assertEq(blockhash(FORK_BLOCK), FORK_BLOCK_HASH);
         vm.rollFork(FORK_BLOCK);
         assertEq(block.number, FORK_BLOCK);
         assertEq(block.chainid, DeepstateAddresses.CHAIN_ID);
-
-        deployment.run();
-        deployment.deployPinnedContracts();
-        _executeDGP001ThroughGovernor();
-        vm.clearMockedCalls();
     }
 
     function _executeDGP001ThroughGovernor() private {
@@ -274,7 +293,8 @@ contract DGP002Test is Test {
         IDeepstateV1DGP001View router = IDeepstateV1DGP001View(DeepstateAddresses.ROUTER);
         bytes32 bookId = _PINNED_ACTIVE_BOOK_ID;
 
-        // This sequential test starts before either proposal. It models the operational cancellation phase required
+        // This sequential test starts after the production deployment but before either proposal. It models the
+        // operational cancellation phase required
         // by DGP-001 while retaining real Router hook writes and every other archive-fork dependency interaction.
         vm.mockCall(
             DeepstateAddresses.ROUTER,

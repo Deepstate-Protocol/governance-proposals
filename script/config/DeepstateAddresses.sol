@@ -9,7 +9,7 @@ library DeepstateAddresses {
     uint256 internal constant CHAIN_ID = 4_663;
     uint48 internal constant GOVERNANCE_START = 1_788_074_638;
 
-    // Release policy, not protocol-discovered values. Changing any value creates a different CREATE2 deployment.
+    // Release policy, not protocol-discovered values.
     uint256 internal constant MINTER_MAX_SUPPLY = 3_000_000_000e18;
     uint256 internal constant MINIMUM_ACTIVATION_ISSUANCE_HEADROOM = 442_857_142_857_142_857_142_857_142;
 
@@ -84,23 +84,17 @@ library DeepstateAddresses {
     uint256 internal constant SABLIER_LOCKUP_MIN_FEE_USD = 0;
     uint256 internal constant SABLIER_MAX_FEE_USD = 10_000_000_000;
 
-    // Arachnid's canonical deterministic deployment proxy, used only after an explicit deployment confirmation.
-    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    bytes32 internal constant CREATE2_DEPLOYER_CODEHASH =
-        0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989;
-
-    // Deterministic Rewarder V2 system deployments. These addresses are fixed by the reviewed CREATE2 deployer,
-    // salts, init code, constructor arguments, compiler settings, and pinned dependency revisions.
-    address internal constant MINTER_CONTROLLER = 0x5f32dB3327fecFB1390FAE0686e771b14DfB83aa;
+    // Production Rewarder V2 deployment from DeployContracts at commit 866f002.
+    address internal constant MINTER_CONTROLLER = 0xC8681acce8457796781A36e788D3deBB0DC33168;
     bytes32 internal constant MINTER_CONTROLLER_CODEHASH =
         0x64aa352e16ca4357ca2a2d721576d6b6b7c935b86cb7910ab1f313aec066372f;
-    address internal constant DGP001_BOOTSTRAP = 0x310594e99815E00F7a8c866bd1578DC2Db00C975;
+    address internal constant DGP001_BOOTSTRAP = 0x31b71cE77FcbbA3742Fc16038099BD3f07EE4859;
     bytes32 internal constant DGP001_BOOTSTRAP_CODEHASH =
         0x54746ff520805e9f7fe31466c939b79b4664af53b2b65c33d445599f09e52606;
-    address internal constant V1_CONTROLLER = 0x8900cd1D03Aaa1F9d4B7649a268985E0C48B4476;
+    address internal constant V1_CONTROLLER = 0x616856fAA2084E6E12305FD12514b107E12B4521;
     bytes32 internal constant V1_CONTROLLER_CODEHASH =
         0x4a0cd3f52cc0439045246c716fef929520d7899c7e4cfae76878703bd0540fcc;
-    address internal constant REWARDER_FACTORY = 0xA847C1fE66D31b8f6416741971F89a958d9AC2D9;
+    address internal constant REWARDER_FACTORY = 0x093495212d14c5c664372c75b7dcE99D166cc691;
     bytes32 internal constant REWARDER_FACTORY_CODEHASH =
-        0xf8b241f61c3bbcc6562c7ba64d40ec84da7511e9e49161bbb638d3ce2956af70;
+        0xcb24a3ec00596ca729e2a0e8420038c8e86d91e60404af83895cf3e94083fcd9;
 }
