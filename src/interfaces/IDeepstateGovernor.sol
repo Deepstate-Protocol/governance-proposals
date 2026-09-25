@@ -58,6 +58,8 @@ interface IDeepstateGovernor {
 
     function quorumNumerator() external view returns (uint256);
 
+    function updateQuorumNumerator(uint256 newQuorumNumerator) external;
+
     function COUNTING_MODE() external view returns (string memory);
 
     function CLOCK_MODE() external view returns (string memory);
