@@ -118,7 +118,22 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
     }
 
     /// @notice Returns the proposal ID reviewed and pinned in the concrete proposal script.
-    function expectedProposalId() public pure virtual returns (uint256);
+    function expectedProposalId() public view virtual returns (uint256);
+
+    /// @notice Governor targeted by this proposal. Legacy governance remains the default.
+    function governorAddress() public pure virtual returns (address) {
+        return DeepstateAddresses.GOVERNOR;
+    }
+
+    /// @notice Voting token expected from the targeted Governor.
+    function votingTokenAddress() public pure virtual returns (address) {
+        return DeepstateAddresses.STATE;
+    }
+
+    /// @notice Immutable governance-start timestamp expected from the targeted Governor.
+    function expectedGovernanceStart() public pure virtual returns (uint48) {
+        return DeepstateAddresses.GOVERNANCE_START;
+    }
 
     /// @dev Override to enforce proposal-specific live conditions immediately before submission.
     function _beforeSubmission() internal view virtual {}
@@ -138,9 +153,9 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
         uint256 expectedChainId = DeepstateAddresses.CHAIN_ID;
         if (block.chainid != expectedChainId) revert UnsupportedChain(block.chainid, expectedChainId);
 
-        address governorAddress = DeepstateAddresses.GOVERNOR;
-        if (governorAddress.code.length == 0) revert MissingGovernorCode(governorAddress);
-        governor = IDeepstateGovernor(governorAddress);
+        address targetGovernor = governorAddress();
+        if (targetGovernor.code.length == 0) revert MissingGovernorCode(targetGovernor);
+        governor = IDeepstateGovernor(targetGovernor);
 
         string memory actualName;
         try governor.name() returns (string memory returnedName) {
@@ -158,7 +173,7 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
         } catch {
             revert GovernorIdentityCallFailed(IDeepstateGovernor.token.selector);
         }
-        address expectedToken = DeepstateAddresses.STATE;
+        address expectedToken = votingTokenAddress();
         if (actualToken != expectedToken) revert UnexpectedVotingToken(actualToken, expectedToken);
 
         uint48 currentTimepoint;
@@ -173,12 +188,12 @@ abstract contract DeepstateProposalScript is Script, DeepstateProposal {
         } catch {
             revert GovernorIdentityCallFailed(IDeepstateGovernor.governanceStart.selector);
         }
-        uint48 expectedStart = DeepstateAddresses.GOVERNANCE_START;
+        uint48 expectedStart = expectedGovernanceStart();
         if (start != expectedStart) revert UnexpectedGovernanceStart(start, expectedStart);
         if (currentTimepoint < start) revert GovernanceNotStarted(currentTimepoint, start);
     }
 
-    function _validatedProposalId(uint256 generatedProposalId) internal pure returns (uint256) {
+    function _validatedProposalId(uint256 generatedProposalId) internal view returns (uint256) {
         uint256 expected = expectedProposalId();
         if (expected == 0) revert UnpinnedProposalId();
         if (generatedProposalId != expected) revert ProposalIdMismatch(generatedProposalId, expected);

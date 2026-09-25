@@ -1,11 +1,13 @@
 # Deepstate governance proposals
 
 Foundry project for authoring, reviewing, simulating, and submitting proposals to the live Deepstate Governor. The
-repository contains the hardened Rewarder V2 release candidate and ordinary deployment tooling, but no
-submission-ready governance proposal yet. DGP-001 now has an exact executable payload candidate and proposal-specific
-tests; it remains blocked from submission until the system contracts are deployed, receipts are recorded, the live
-market is prepared, and the final archive-fork lifecycle test passes. DGP-002 now has an exact three-mint payload and
+repository contains the hardened Rewarder V2 release candidate and ordinary deployment tooling. DGP-004 targets the
+deployed 2DEEP token and Governor. DGP-001 has an exact executable payload candidate
+and proposal-specific tests; it remains blocked from submission until the system contracts are deployed, receipts are
+recorded, the live market is prepared, and the final archive-fork lifecycle test passes. DGP-002 now has an exact three-mint payload and
 sequential fork suite, but must be repinned to a real production block after DGP-001 executes.
+DGP-004 targets the live 2DEEP token and Governor created by DGP-003. Its allocation contract is deployed first, and
+the actual allocator address is then supplied to the proposal-submission script.
 
 The project follows the Solidity and deployment conventions in
 [`deepstate-contracts`](https://github.com/Deepstate-Protocol/deepstate-contracts) and
@@ -94,6 +96,8 @@ proposals/DGP-NNN.md                   voter-facing description body
 script/DeployContracts.s.sol           deploys the four system contracts in one ordinary-CREATE run
 script/DeployDGP001.s.sol              registers DGP-001 with the Governor
 script/DeployDGP002.s.sol              registers DGP-002 with the Governor
+script/DeployDGP004Allocation.s.sol    phase one: deploys the fixed-token DGP-004 allocator
+script/DeployDGP004.s.sol              phase two: registers DGP-004 with the 2DEEP Governor
 script/proposals/DGPNNN/Deploy.s.sol   reviewed proposal payload implementation
 test/proposals/DGPNNN/Proposal.t.sol   exact payload and pinned-fork target-effects tests
 src/Deepstate*Controller.sol           Rewarder V2 candidate controllers and factory
@@ -138,7 +142,7 @@ fresh Robinhood fork. `make invariants` runs the dedicated deployment, activatio
 state machines. See [`docs/INVARIANT_COVERAGE.md`](docs/INVARIANT_COVERAGE.md) for the condition-by-condition mapping
 and the assumptions that cannot be proven by an EVM test.
 
-## Production workflow: three scripts
+## Rewarder V2 production workflow: three scripts
 
 There are exactly three operator-facing scripts:
 

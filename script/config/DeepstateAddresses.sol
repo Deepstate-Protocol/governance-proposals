@@ -66,6 +66,11 @@ library DeepstateAddresses {
     address internal constant PROPOSER = DEEPSTATE_INC_SAFE_OWNER;
     uint256 internal constant DEEPSTATE_INC_SAFE_THRESHOLD = 1;
 
+    // DGP-003 production deployment. DGP-004 is governed by 2DEEP rather than legacy STATE governance.
+    address internal constant TWO_DEEP = 0x62177377c361bf76F12612aA153a9b405bef9FF2;
+    address internal constant TWO_DEEP_GOVERNOR = 0xF5011f7F3B09D2A6D1cF74A7f50400b37a6Ea82C;
+    uint48 internal constant TWO_DEEP_GOVERNANCE_START = 1_790_295_824;
+
     // Official Sablier Lockup v4 deployment for Robinhood Chain. The original vanity Comptroller was compromised;
     // Lockup is wired to this official replacement proxy. Pin the proxy implementation because it is upgradeable.
     address internal constant SABLIER_LOCKUP = 0x548129a58bC230549DF7F9e33f27E77F6779ff0f;
