@@ -19,7 +19,7 @@ contract DGP004Test is Test {
     uint256 internal constant FORK_BLOCK = 72347663;
     bytes32 internal constant FORK_BLOCK_HASH = 0x0a6f97f400832ee49fadf10c0c68bfb8f93e28875890f792575ba4c4aed2f805;
     bytes32 internal constant EXPECTED_DESCRIPTION_HASH =
-        0x18cd389576be32786dcbd8e44e293f5f441accae350176921113644f720eb22e;
+        0x595c3116afb25d7380bc137c4a00d26c678a7e7e43b737bdd090bcaa2dce1e4a;
 
     bytes32 internal constant MINTER_ROLE = keccak256("MINTER_ROLE");
     uint256 internal constant VOTE_TOP_UP = 30_000_000e18;
